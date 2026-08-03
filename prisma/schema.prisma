@@ -1,4 +1,4 @@
-// Prisma Schema for ForgeGate Backend Infrastructure Platform
+// Prisma Schema for ForgeGate Distributed Backend Workflow Platform
 
 generator client {
   provider = "prisma-client-js"
@@ -19,11 +19,12 @@ model User {
   createdAt    DateTime @default(now()) @map("created_at")
   updatedAt    DateTime @updatedAt @map("updated_at")
 
-  role          Role           @relation(fields: [roleId], references: [id])
-  oauthAccounts OAuthAccount[]
-  refreshTokens RefreshToken[]
-  auditLogs     AuditLog[]
-  subscriptions Subscription[]
+  role               Role                @relation(fields: [roleId], references: [id])
+  oauthAccounts      OAuthAccount[]
+  refreshTokens      RefreshToken[]
+  auditLogs          AuditLog[]
+  subscriptions      Subscription[]
+  createdWorkflows   Workflow[]          @relation("UserWorkflows")
 
   @@map("users")
 }
@@ -33,7 +34,6 @@ model Role {
   name        String   @unique // 'admin', 'moderator', 'user'
   description String?
   createdAt   DateTime @default(now()) @map("created_at")
-  updatedAt   DateTime @updatedAt @map("updated_at")
 
   users       User[]
   permissions RolePermission[]
@@ -45,7 +45,6 @@ model Permission {
   id          String   @id @default(uuid())
   name        String   @unique
   description String?
-  createdAt   DateTime @default(now()) @map("created_at")
 
   roles RolePermission[]
 
@@ -66,10 +65,8 @@ model RolePermission {
 model OAuthAccount {
   id             String   @id @default(uuid())
   userId         String   @map("user_id")
-  provider       String   // 'google', 'github'
+  provider       String
   providerUserId String   @map("provider_user_id")
-  accessToken    String?  @map("access_token")
-  refreshToken   String?  @map("refresh_token")
   createdAt      DateTime @default(now()) @map("created_at")
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
@@ -84,11 +81,69 @@ model RefreshToken {
   tokenHash String   @map("token_hash")
   expiresAt DateTime @map("expires_at")
   revoked   Boolean  @default(false)
-  createdAt DateTime @default(now()) @map("created_at")
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@map("refresh_tokens")
+}
+
+model Workflow {
+  id          String   @id @default(uuid())
+  name        String
+  description String?
+  triggerType String   @default("webhook") @map("trigger_type") // 'webhook', 'cron', 'event'
+  isActive    Boolean  @default(true) @map("is_active")
+  createdById String   @map("created_by_id")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  createdBy  User                @relation("UserWorkflows", fields: [createdById], references: [id])
+  steps      WorkflowStep[]
+  executions WorkflowExecution[]
+
+  @@map("workflows")
+}
+
+model WorkflowStep {
+  id         String @id @default(uuid())
+  workflowId String @map("workflow_id")
+  stepOrder  Int    @map("step_order")
+  actionType String @map("action_type") // 'http_request', 'email_notification', 'data_transform'
+  config     Json
+  retryLimit Int    @default(3) @map("retry_limit")
+
+  workflow Workflow @relation(fields: [workflowId], references: [id], onDelete: Cascade)
+
+  @@map("workflow_steps")
+}
+
+model WorkflowExecution {
+  id          String    @id @default(uuid())
+  workflowId  String    @map("workflow_id")
+  status      String    @default("pending") // 'pending', 'running', 'completed', 'failed', 'retrying'
+  currentStep Int       @default(1) @map("current_step")
+  metadata    Json?
+  startedAt   DateTime  @default(now()) @map("started_at")
+  completedAt DateTime? @map("completed_at")
+
+  workflow Workflow       @relation(fields: [workflowId], references: [id], onDelete: Cascade)
+  logs     ExecutionLog[]
+
+  @@map("workflow_executions")
+}
+
+model ExecutionLog {
+  id          String   @id @default(uuid())
+  executionId String   @map("execution_id")
+  stepId      String?  @map("step_id")
+  status      String
+  output      Json?
+  error       String?
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  execution WorkflowExecution @relation(fields: [executionId], references: [id], onDelete: Cascade)
+
+  @@map("execution_logs")
 }
 
 model AuditLog {
@@ -105,30 +160,14 @@ model AuditLog {
   @@map("audit_logs")
 }
 
-model Plan {
-  id        String   @id @default(uuid())
-  name      String   @unique
-  price     Float
-  features  Json?
-  createdAt DateTime @default(now()) @map("created_at")
-  updatedAt DateTime @updatedAt @map("updated_at")
-
-  subscriptions Subscription[]
-
-  @@map("plans")
-}
-
 model Subscription {
   id               String   @id @default(uuid())
   userId           String   @map("user_id")
-  planId           String   @map("plan_id")
-  status           String   @default("active") // 'active', 'canceled', 'past_due'
+  planName         String   @map("plan_name")
+  status           String   @default("active")
   currentPeriodEnd DateTime @map("current_period_end")
-  createdAt        DateTime @default(now()) @map("created_at")
-  updatedAt        DateTime @updatedAt @map("updated_at")
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
-  plan Plan @relation(fields: [planId], references: [id], onDelete: Restrict)
 
   @@map("subscriptions")
 }

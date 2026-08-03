@@ -1,6 +1,35 @@
-# ForgeGate - Backend Infrastructure Platform
+# ForgeGate – Distributed Backend Workflow Platform
 
-ForgeGate is a production-ready, enterprise-grade backend infrastructure platform built with NestJS, TypeScript, Prisma ORM, PostgreSQL, Redis, RabbitMQ, Prometheus, and Docker Compose. It serves as a blueprint for modern backend architecture featuring authentication, role-based access control (RBAC), rate limiting, asynchronous task queues, audit logging, health monitoring, and observability.
+ForgeGate is a production-style, microservices-based distributed backend workflow execution platform. Built as a high-performance pnpm monorepo, it demonstrates system architecture patterns including API Gateway routing, distributed background job processing, state-machine workflow execution, structured JSON logging, Redis-backed caching, and containerized deployment.
+
+Instead of a generic CRUD project, ForgeGate focuses on core backend engineering challenges: distributed job queue reliability, failure recovery, atomic workflow step execution, and microservice boundary isolation.
+
+---
+
+## Folder Structure
+
+```text
+ForgeGate/
+├── apps/
+│   ├── api-gateway/          # Central ingress entry point, validation & swagger
+│   ├── auth-service/         # User authentication, JWT token rotation, RBAC
+│   ├── workflow-service/     # Workflow state engine & distributed job queue
+│   └── notification-service/ # Asynchronous email & event consumer worker
+├── packages/
+│   ├── common/               # Shared DTOs, response interceptors, exception filters
+│   ├── logger/               # Structured JSON Winston logging module
+│   ├── auth/                 # Shared JWT strategies & RBAC decorators
+│   └── config/               # Validated environment configuration schemas
+├── infra/
+│   ├── docker/               # Dockerfiles & docker-compose orchestration
+│   ├── nginx/                # Reverse proxy gateway routing
+│   ├── postgres/             # Database initialization
+│   └── redis/                # Caching & BullMQ queue storage
+├── docs/
+│   ├── architecture/         # System design documentation
+│   └── api/                  # OpenAPI specifications
+└── prisma/                   # Centralized database schema & migrations
+```
 
 ---
 
@@ -8,83 +37,79 @@ ForgeGate is a production-ready, enterprise-grade backend infrastructure platfor
 
 ```mermaid
 flowchart TD
-    Client[Client / Consumer] --> Gateway[API Gateway / NestJS App]
+    Client[Client / Internal Service] --> Nginx[Nginx Reverse Proxy / Gateway]
     
-    subgraph Core Platform
-        Gateway --> Auth[Auth Module - JWT / OAuth]
-        Gateway --> User[User Module - RBAC]
-        Gateway --> Audit[Audit Logging Module]
-        Gateway --> Billing[Billing Module]
-        Gateway --> Health[Health & Observability Module]
+    subgraph Ingress Layer
+        Nginx --> Gateway[apps/api-gateway]
     end
 
-    subgraph Infrastructure Services
-        Auth --> Redis[(Redis Cache & Blacklist)]
-        User --> Postgres[(PostgreSQL Primary DB)]
-        Audit --> Postgres
-        Billing --> Postgres
-        Gateway --> Queue[RabbitMQ Task Queue]
-        Health --> Prometheus[Prometheus Metrics]
+    subgraph Core Microservices
+        Gateway --> AuthService[apps/auth-service]
+        Gateway --> WorkflowEngine[apps/workflow-service]
+    end
+
+    subgraph Data & Queue Infrastructure
+        AuthService --> Redis[(Redis Cache & Revocation)]
+        AuthService --> Postgres[(PostgreSQL DB)]
+        WorkflowEngine --> Postgres
+        WorkflowEngine --> Queue[BullMQ / Redis Job Queue]
+    end
+
+    subgraph Async Consumers
+        Queue --> NotificationWorker[apps/notification-service]
+        Queue --> RetryEngine[Exponential Backoff Retry Queue]
     end
 ```
 
 ---
 
-## Features
+## Key Backend Features
 
-- **Authentication & Authorization**:
-  - JWT Authentication (Access + Refresh token rotation)
-  - Redis-backed token revocation / blacklist
-  - Role-Based Access Control (RBAC) with granular permissions (Admin, Moderator, User)
-  - OAuth 2.0 Integration (Google, GitHub)
-- **API Gateway Features**:
-  - Global validation pipe with class-validator
-  - Centralized error handling and standardized HTTP responses
-  - Redis-backed distributed rate limiting (per IP and per User)
-- **Database & Data Modeling**:
-  - PostgreSQL with Prisma ORM
-  - Automatic migrations and database seeding script
-  - Models: Users, Roles, Permissions, OAuth Accounts, Refresh Tokens, Audit Logs, Billing Plans, Subscriptions
-- **Asynchronous Task Processing**:
-  - RabbitMQ message broker for decoupled background processing
-  - Asynchronous email notifications queue (Welcome emails, Password resets)
-  - Dead-letter queue concept support
-- **Audit Logging**:
-  - Immutable audit logs capturing user actions, IP addresses, user agents, and metadata
-- **Observability & Health Checks**:
-  - Prometheus metrics endpoint (`/api/v1/metrics`)
-  - Multi-service health monitoring (`/api/v1/health`) for PostgreSQL, Redis, and RabbitMQ
-- **Containerization**:
-  - Multi-stage Dockerfile optimized for production
-  - Complete stack orchestration via Docker Compose
+- **Microservice Architecture & Monorepo**:
+  - Managed via pnpm workspaces with clear service boundary separation.
+  - Shared internal npm packages (`@forgegate/common`, `@forgegate/logger`, `@forgegate/auth`, `@forgegate/config`).
+- **Distributed Workflow Execution Engine**:
+  - Asynchronous step execution engine with state transitions (`pending`, `running`, `completed`, `failed`).
+  - Distributed background queues powered by BullMQ / Redis.
+  - Automatic job retry queues with exponential backoff and dead-letter handling.
+- **Production Observability & Logging**:
+  - Structured JSON logging using Winston across all microservices.
+  - Multi-service health check endpoints monitoring PostgreSQL, Redis, and message brokers.
+  - Prometheus metrics collection (`/api/v1/metrics`).
+- **Security & Authorization**:
+  - JWT authentication with access/refresh token rotation.
+  - Immediate Redis token revocation / blacklist.
+  - Role-Based Access Control (RBAC) with custom route decorators.
+- **Infrastructure & Containerization**:
+  - Nginx API Gateway reverse proxy routing requests to downstream microservices.
+  - Fully containerized environment via Docker Compose.
 
 ---
 
 ## Tech Stack
 
-| Component | Technology |
+| Layer | Technology |
 | :--- | :--- |
 | **Language & Runtime** | TypeScript, Node.js v20+ |
-| **Framework** | NestJS |
-| **Package Manager** | pnpm |
+| **Monorepo Manager** | pnpm Workspaces |
+| **Backend Framework** | NestJS |
 | **Database & ORM** | PostgreSQL 16, Prisma ORM |
-| **Caching & Rate Limiting** | Redis 7, ioredis |
-| **Message Queue** | RabbitMQ 3 (AMQP) |
-| **Documentation** | OpenAPI 3.0 / Swagger |
-| **Observability** | Prometheus, Winston |
+| **Cache & Distributed Queue** | Redis 7, BullMQ, ioredis |
+| **Message Broker** | RabbitMQ 3 |
+| **Reverse Proxy** | Nginx |
+| **Logging & Metrics** | Winston (JSON), Prometheus |
 | **Containerization** | Docker, Docker Compose |
 
 ---
 
-## Getting Started
+## How to Run
 
 ### Prerequisites
-
 - Node.js v20 or higher
 - pnpm (v8 or higher)
 - Docker & Docker Compose
 
-### Local Development Setup
+### Local Monorepo Setup
 
 1. **Clone the Repository**:
    ```bash
@@ -92,7 +117,7 @@ flowchart TD
    cd ForgeGate
    ```
 
-2. **Install Dependencies**:
+2. **Install Monorepo Workspace Dependencies**:
    ```bash
    pnpm install
    pnpm approve-builds --all
@@ -103,77 +128,72 @@ flowchart TD
    cp .env.example .env
    ```
 
-4. **Start Infrastructure Services**:
+4. **Start Infrastructure Containers (PostgreSQL, Redis, RabbitMQ, Prometheus)**:
    ```bash
-   docker-compose up -d postgres redis rabbitmq prometheus
+   pnpm run docker:up
    ```
 
-5. **Run Database Migrations & Seed Data**:
+5. **Generate Database Client & Run Migrations**:
    ```bash
    pnpm run prisma:generate
    pnpm run prisma:migrate
-   pnpm run prisma:seed
    ```
 
-6. **Start Application**:
+6. **Build All Workspace Packages & Microservices**:
    ```bash
-   # Development mode with watch
-   pnpm run start:dev
-
-   # Production build & start
    pnpm run build
-   pnpm run start:prod
    ```
 
 ---
 
-## Environment Variables Explanation
+## Docker Deployment
 
-| Variable | Description | Default Value |
-| :--- | :--- | :--- |
-| `PORT` | Application server port | `3000` |
-| `NODE_ENV` | Environment mode (`development`, `production`, `test`) | `development` |
-| `API_PREFIX` | Global API route prefix | `api/v1` |
-| `DATABASE_URL` | PostgreSQL connection string | `postgresql://forgegate_user:forgegate_password@localhost:5432/forgegate_db?schema=public` |
-| `REDIS_HOST` | Redis host address | `localhost` |
-| `REDIS_PORT` | Redis port | `6379` |
-| `RABBITMQ_URL` | RabbitMQ connection URL | `amqp://guest:guest@localhost:5672` |
-| `RABBITMQ_QUEUE` | Queue name for background notification jobs | `notifications_queue` |
-| `JWT_ACCESS_SECRET` | Secret key for access token signing | `super-secret-access-key` |
-| `JWT_REFRESH_SECRET` | Secret key for refresh token signing | `super-secret-refresh-key` |
-| `JWT_ACCESS_EXPIRES_IN` | Access token lifespan | `15m` |
-| `JWT_REFRESH_EXPIRES_IN` | Refresh token lifespan | `7d` |
+To launch the entire platform (Nginx Gateway, API Gateway, Microservices, Databases, and Queue workers) with a single command:
+
+```bash
+docker-compose -f infra/docker/docker-compose.yml up --build -d
+```
+
+### Active Endpoints
+
+- **Nginx Ingress / API Gateway**: `http://localhost/api/v1`
+- **Swagger OpenAPI Documentation**: `http://localhost/api/v1/docs`
+- **Gateway Health Endpoint**: `http://localhost/api/v1/health`
+- **Prometheus Metrics**: `http://localhost:9090`
+- **RabbitMQ Management Console**: `http://localhost:15672` (guest / guest)
 
 ---
 
 ## API Documentation
 
-Interactive Swagger documentation is available once the server is running.
+Swagger OpenAPI 3.0 specs are aggregated at the API Gateway level.
 
-- **Swagger UI**: [http://localhost:3000/api/v1/docs](http://localhost:3000/api/v1/docs)
-- **Health Check**: [http://localhost:3000/api/v1/health](http://localhost:3000/api/v1/health)
+- Interactive API Spec: [http://localhost/api/v1/docs](http://localhost/api/v1/docs)
+- Static OpenAPI File: [docs/api/openapi-spec.json](docs/api/openapi-spec.json)
 
 ---
 
-## Running with Docker Compose
+## Screenshots
 
-To start the full application stack including backend, PostgreSQL, Redis, RabbitMQ, and Prometheus with a single command:
+*(Place system monitoring dashboards, Swagger UI, and Redis execution log screenshots here)*
 
-```bash
-docker-compose up --build
+---
+
+## Resume Impact Highlights
+
+When presenting ForgeGate on a backend engineering resume:
+
+```text
+ForgeGate – Distributed Backend Workflow Platform
+- Designed a microservices architecture with an API Gateway, authentication service, and asynchronous job processing using BullMQ and Redis.
+- Built secure JWT authentication with RBAC, request validation, Redis-backed token revocation, and centralized JSON logging.
+- Containerized microservices using Docker Compose and documented endpoints using Swagger OpenAPI specs.
 ```
-
-Access services at:
-- **ForgeGate API**: `http://localhost:3000/api/v1`
-- **Swagger Documentation**: `http://localhost:3000/api/v1/docs`
-- **RabbitMQ Management Dashboard**: `http://localhost:15672` (Username: `guest`, Password: `guest`)
-- **Prometheus Dashboard**: `http://localhost:9090`
 
 ---
 
 ## Future Improvements
 
-- Add Grafana dashboard definitions and pre-configured JSON templates for real-time visualization.
-- Implement Stripe webhook handlers for complete billing automation.
-- Add GitHub Actions CI workflow for automated linting, unit testing, and Docker image builds.
-- Introduce Distributed Tracing via OpenTelemetry and Jaeger.
+- Implement multi-tenant workflow isolation for secure workspace execution.
+- Add OpenTelemetry distributed tracing across HTTP microservice boundaries.
+- Build visual workflow builder web UI.

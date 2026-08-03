@@ -1,0 +1,16 @@
+{
+  "name": "@forgegate/config",
+  "version": "1.0.0",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc"
+  },
+  "dependencies": {
+    "dotenv": "^16.6.1",
+    "joi": "^17.13.4"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.3"
+  }
+}

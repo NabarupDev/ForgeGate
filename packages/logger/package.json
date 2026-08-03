@@ -1,0 +1,16 @@
+{
+  "name": "@forgegate/logger",
+  "version": "1.0.0",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc"
+  },
+  "dependencies": {
+    "@nestjs/common": "^10.4.22",
+    "winston": "^3.19.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.3"
+  }
+}

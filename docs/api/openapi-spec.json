@@ -1,0 +1,30 @@
+{
+  "openapi": "3.0.0",
+  "info": {
+    "title": "ForgeGate Distributed Backend Workflow Platform API",
+    "version": "1.0.0",
+    "description": "API Specification for ForgeGate Microservices"
+  },
+  "paths": {
+    "/api/v1/health": {
+      "get": {
+        "summary": "Gateway Health Check",
+        "responses": {
+          "200": {
+            "description": "Health status"
+          }
+        }
+      }
+    },
+    "/api/v1/workflows": {
+      "post": {
+        "summary": "Create Workflow",
+        "responses": {
+          "201": {
+            "description": "Workflow created successfully"
+          }
+        }
+      }
+    }
+  }
+}

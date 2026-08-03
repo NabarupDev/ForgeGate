@@ -1,0 +1,15 @@
+FROM node:20-alpine
+
+WORKDIR /app
+
+COPY pnpm-lock.yaml pnpm-workspace.yaml package.json ./
+COPY packages ./packages
+COPY apps/api-gateway ./apps/api-gateway
+COPY prisma ./prisma
+
+RUN corepack enable pnpm && pnpm install --frozen-lockfile
+RUN pnpm --filter api-gateway run build
+
+EXPOSE 3000
+
+CMD ["node", "apps/api-gateway/dist/main.js"]
