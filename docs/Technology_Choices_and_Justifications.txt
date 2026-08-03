@@ -1,0 +1,293 @@
+================================================================================
+TECHNOLOGY CHOICES & JUSTIFICATIONS
+Backend Infrastructure Platform
+================================================================================
+
+This document explains the recommended technology stack, why each technology 
+was chosen, and why common alternatives were not selected for this project.
+
+
+================================================================================
+1. RECOMMENDED PRIMARY STACK (Best Overall for Portfolio)
+================================================================================
+
+Language / Runtime     : Node.js + TypeScript
+Framework              : NestJS
+Database               : PostgreSQL
+ORM                    : Prisma
+Cache / Rate Limit     : Redis
+Message Queue          : RabbitMQ (+ BullMQ or amqplib)
+Auth                   : Passport.js + JWT + OAuth strategies
+API Documentation      : Swagger (built into NestJS)
+Observability          : Prometheus + Grafana
+Containerization       : Docker + Docker Compose
+CI/CD                  : GitHub Actions
+Validation             : class-validator + class-transformer
+Logging                : Pino or Winston (structured JSON)
+
+
+================================================================================
+2. DETAILED JUSTIFICATIONS
+================================================================================
+
+--------------------------------------------------
+2.1 Language: Node.js + TypeScript
+--------------------------------------------------
+
+Why Node.js + TypeScript?
+- Extremely common in modern backend roles (especially startups & mid-size companies)
+- TypeScript gives type safety → fewer runtime bugs and better IDE support
+- Huge ecosystem and hiring demand
+- Excellent for I/O-heavy workloads (APIs, queues, real-time)
+- Easy to demonstrate both monolith and microservice patterns
+
+Why not pure JavaScript?
+- Lack of static typing hurts maintainability on a project of this size
+- Recruiters prefer TypeScript for serious backend work
+
+Why not Go?
+- Go is excellent (performance, concurrency, simple deployment)
+- However, the learning curve + less mature ecosystem for rapid feature building
+  makes NestJS faster for a complete portfolio project
+- Go is a strong alternative if you already know it well
+
+Why not Python (FastAPI)?
+- FastAPI is very good and has excellent docs
+- Python is slightly less common for high-scale pure backend infrastructure roles
+  compared to Node/Go/Java in many markets
+- Still a valid choice if you are stronger in Python
+
+Why not Java / Spring Boot?
+- Very strong enterprise signal
+- Heavier and slower to develop for a portfolio project
+- Overkill unless targeting large enterprise companies specifically
+
+
+--------------------------------------------------
+2.2 Framework: NestJS
+--------------------------------------------------
+
+Why NestJS?
+- Opinionated structure (modules, providers, controllers) → clean architecture
+- Built-in support for:
+  - Dependency Injection
+  - Guards (perfect for RBAC)
+  - Interceptors
+  - Pipes (validation)
+  - Swagger
+  - Microservices
+- Makes the "API Gateway + services" pattern very natural
+- Excellent TypeScript support
+- Widely used in production
+
+Why not Express / Fastify alone?
+- Too low-level. You would have to build a lot of structure yourself
+- NestJS sits on top of Express or Fastify and gives you architecture for free
+
+Why not AdonisJS / other Node frameworks?
+- Smaller community and fewer job references compared to NestJS
+
+
+--------------------------------------------------
+2.3 Database: PostgreSQL
+--------------------------------------------------
+
+Why PostgreSQL?
+- Industry standard for relational data
+- Excellent support for JSONB (useful for metadata, audit logs, features)
+- Strong consistency, ACID compliance
+- Perfect for users, roles, permissions, subscriptions, audit logs
+- Widely expected knowledge in backend interviews
+
+Why not MongoDB?
+- Document model is less natural for strong relational data (users ↔ roles ↔ permissions)
+- RBAC and audit logs work better with proper foreign keys
+- PostgreSQL + JSONB gives you flexibility when needed without losing relations
+
+Why not MySQL?
+- PostgreSQL is generally preferred in modern backend stacks
+- Better JSON support and advanced features
+
+
+--------------------------------------------------
+2.4 ORM: Prisma
+--------------------------------------------------
+
+Why Prisma?
+- Excellent TypeScript integration (generated types)
+- Clean and readable schema
+- Great migration system
+- Very productive for portfolio projects
+- Good enough performance for this use case
+
+Why not TypeORM?
+- Still popular, but Prisma has better developer experience and type safety
+- TypeORM can feel more "Java-like" and heavier
+
+Why not raw SQL / Knex?
+- Too much boilerplate for a project of this scope
+- Prisma still allows raw queries when needed
+
+
+--------------------------------------------------
+2.5 Cache & Rate Limiting: Redis
+--------------------------------------------------
+
+Why Redis?
+- De-facto standard for caching and rate limiting
+- Extremely fast
+- Supports multiple data structures
+- Perfect for:
+  - JWT blacklist
+  - Rate limit counters
+  - Caching user/role data
+- Almost every serious backend uses Redis
+
+Why not in-memory cache only?
+- Does not survive restarts
+- Cannot be shared across multiple instances
+- Not production-like
+
+Why not Memcached?
+- Redis is more feature-rich and far more common today
+
+
+--------------------------------------------------
+2.6 Message Queue: RabbitMQ
+--------------------------------------------------
+
+Why RabbitMQ?
+- Classic, reliable message broker
+- Excellent for learning AMQP concepts (exchanges, queues, routing keys, DLQ)
+- Widely used in enterprise and mid-size systems
+- Clear separation between producer and consumer
+- Perfect for email queue and background jobs
+
+Why not Kafka?
+- Kafka is overkill for this project
+- Higher operational complexity
+- Better suited for high-throughput event streaming
+- RabbitMQ is more appropriate for task queues and notifications
+
+Why not AWS SQS / cloud queues?
+- Harder to run fully locally
+- Less educational (you hide the broker)
+- Dockerized RabbitMQ teaches real concepts
+
+Why not BullMQ (Redis-based) alone?
+- BullMQ is excellent and simpler
+- However, using real RabbitMQ shows deeper understanding of message brokers
+- You can still use BullMQ on top of Redis if you prefer simplicity
+  (acceptable alternative)
+
+
+--------------------------------------------------
+2.7 Authentication
+--------------------------------------------------
+
+Why Passport.js + JWT + OAuth?
+- Passport is the standard authentication middleware in Node ecosystem
+- JWT is the most common token format for APIs
+- OAuth (Google/GitHub) is expected knowledge
+
+Why not Auth0 / Clerk / Supabase Auth?
+- Using a third-party auth service hides too much implementation
+- Recruiters want to see that you understand how auth actually works
+- Building it yourself is much stronger for a portfolio
+
+
+--------------------------------------------------
+2.8 Observability: Prometheus + Grafana
+--------------------------------------------------
+
+Why Prometheus + Grafana?
+- Industry standard open-source monitoring stack
+- Prometheus for metrics collection
+- Grafana for visualization
+- Shows you care about production readiness (not just "it works")
+
+Why not just console logs or basic APM?
+- Too weak for a project that claims "infrastructure" level
+- Prometheus/Grafana is recognizable and impressive
+
+
+--------------------------------------------------
+2.9 Containerization: Docker + Docker Compose
+--------------------------------------------------
+
+Why Docker Compose?
+- One command to start the entire realistic environment
+- Essential skill
+- Makes the project easy for anyone to run (including recruiters)
+
+Why not Kubernetes from the start?
+- Too complex for the first version
+- Can be added later as an improvement
+
+
+--------------------------------------------------
+2.10 CI/CD: GitHub Actions
+--------------------------------------------------
+
+Why GitHub Actions?
+- Free for public repositories
+- Most common CI system developers encounter
+- Easy to demonstrate lint → test → build pipeline
+
+
+================================================================================
+3. ACCEPTABLE ALTERNATIVE STACKS
+================================================================================
+
+If you are stronger in another language, these are still very good:
+
+Alternative A – Go
+- Gin or Fiber + GORM or sqlc + Redis + RabbitMQ
+- Extremely strong performance signal
+- Slightly more work to reach the same feature completeness
+
+Alternative B – Python
+- FastAPI + SQLAlchemy or Tortoise + Redis + Celery/RabbitMQ
+- Excellent documentation and speed of development
+- Slightly less "infrastructure" feel than NestJS/Go in some markets
+
+Alternative C – Java
+- Spring Boot + Spring Security + Spring Data JPA
+- Very strong enterprise signal
+- Heavier development experience
+
+
+================================================================================
+4. TECHNOLOGIES TO AVOID FOR THIS PROJECT
+================================================================================
+
+- Firebase / Supabase as main backend → hides too much
+- Serverless-only (AWS Lambda) as primary architecture → harder to show 
+  traditional backend infrastructure concepts
+- GraphQL as the only API style → REST + OpenAPI is clearer for this scope
+- MongoDB as primary database → weaker fit for RBAC + relational data
+- No Docker → project becomes harder to run and less professional
+- No tests or CI → reduces credibility
+
+
+================================================================================
+5. FINAL RECOMMENDATION SUMMARY
+================================================================================
+
+Best balance of:
+- Speed of development
+- Industry recognition
+- Depth of concepts demonstrated
+- Ease of explanation in interviews
+
+→ Node.js + TypeScript + NestJS + PostgreSQL + Prisma + Redis + RabbitMQ 
+  + Prometheus + Grafana + Docker Compose + GitHub Actions
+
+This combination lets you build a complete, impressive system without 
+getting stuck on infrastructure complexity, while still showing real 
+backend engineering maturity.
+
+
+================================================================================
+END OF TECHNOLOGY JUSTIFICATIONS
+================================================================================

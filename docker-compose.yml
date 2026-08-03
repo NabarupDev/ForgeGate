@@ -1,0 +1,78 @@
+version: '3.8'
+
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: forgegate_app
+    ports:
+      - "3000:3000"
+    environment:
+      - PORT=3000
+      - NODE_ENV=production
+      - DATABASE_URL=postgresql://forgegate_user:forgegate_password@postgres:5432/forgegate_db?schema=public
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - RABBITMQ_URL=amqp://guest:guest@rabbitmq:5672
+      - JWT_ACCESS_SECRET=super-secret-access-key-change-in-production
+      - JWT_REFRESH_SECRET=super-secret-refresh-key-change-in-production
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+      rabbitmq:
+        condition: service_started
+    restart: always
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: forgegate_postgres
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_USER: forgegate_user
+      POSTGRES_PASSWORD: forgegate_password
+      POSTGRES_DB: forgegate_db
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U forgegate_user -d forgegate_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    restart: always
+
+  redis:
+    image: redis:7-alpine
+    container_name: forgegate_redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    restart: always
+
+  rabbitmq:
+    image: rabbitmq:3-management-alpine
+    container_name: forgegate_rabbitmq
+    ports:
+      - "5672:5672"
+      - "15672:15672" # RabbitMQ Management Web UI
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
+    restart: always
+
+  prometheus:
+    image: prom/prometheus:v2.49.1
+    container_name: forgegate_prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml
+    restart: always
+
+volumes:
+  postgres_data:
+  redis_data:
+  rabbitmq_data:

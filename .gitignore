@@ -1,0 +1,25 @@
+# Compiled output
+/dist
+/node_modules
+
+# Environment
+.env
+.env.local
+*.env
+
+# IDE / System
+.vscode/
+.idea/
+.DS_Store
+*.log
+
+# Coverage / Test
+/coverage
+/.nyc_output
+
+# Prisma
+/prisma/*.db
+/prisma/*.db-journal
+
+# Docker
+docker-data/

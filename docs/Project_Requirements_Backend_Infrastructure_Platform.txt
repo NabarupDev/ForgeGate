@@ -1,0 +1,372 @@
+================================================================================
+PROJECT 1: BACKEND INFRASTRUCTURE PLATFORM
+Complete Requirements, Scope & Details
+================================================================================
+
+Project Title
+-------------
+Backend Infrastructure Platform (Production-Style Backend Foundation)
+
+
+Project Goal
+------------
+Build a production-ready backend platform that demonstrates strong backend 
+engineering skills. The system should show understanding of authentication, 
+authorization, API design, async processing, caching, observability, 
+containerization, and CI/CD — the exact concerns that appear in real-world 
+backend systems.
+
+
+Target Audience (Why This Project Matters)
+------------------------------------------
+- Backend / Full-stack engineers applying for mid-level or strong junior roles
+- Recruiters and hiring managers who look for systems thinking
+- Portfolio piece that can be explained deeply in interviews
+
+
+================================================================================
+1. HIGH-LEVEL ARCHITECTURE
+================================================================================
+
+Client
+  │
+API Gateway (routing, rate limiting, auth middleware, request logging)
+  │
+┌──────────────┬──────────────┬──────────────┬──────────────┐
+│ User Service │ Auth Service │ Notification │ Billing      │
+│              │              │ Service      │ Service      │
+└──────────────┴──────────────┴──────────────┴──────────────┘
+        │               │               │               │
+   PostgreSQL        Redis         RabbitMQ      Elasticsearch
+        │                                           (optional)
+   Prometheus
+        │
+    Grafana
+
+
+Recommended approach for portfolio:
+- Start as a well-structured Modular Monolith
+- Keep clear service boundaries so it can later evolve into microservices
+- One docker-compose.yml that starts the entire stack
+
+
+================================================================================
+2. REQUIRED FEATURES (MUST BUILD)
+================================================================================
+
+These features are non-negotiable. They form the core of the project.
+
+2.1 Authentication
+- JWT-based authentication (Access Token + Refresh Token)
+- Token rotation on refresh
+- Secure password hashing (bcrypt / argon2)
+- Login, Register, Logout endpoints
+- Token blacklist / revocation using Redis
+- Password reset flow (token via email)
+
+2.2 OAuth
+- At least one OAuth provider (Google or GitHub recommended)
+- Proper linking of OAuth account with local user account
+
+2.3 Role-Based Access Control (RBAC)
+- Roles: Admin, Moderator, User (minimum)
+- Permissions attached to roles
+- Route-level and service-level guards/middleware
+- Ability for Admin to change user roles
+
+2.4 API Gateway Pattern
+- Single entry point for all external requests
+- Common middleware applied at gateway level:
+  - Authentication check
+  - Rate limiting
+  - Request logging
+  - Error formatting
+- Internal routing to different modules/services
+
+2.5 Rate Limiting
+- Redis-backed rate limiting
+- Support for:
+  - Per IP
+  - Per authenticated user
+- Configurable limits (e.g. 100 requests / 15 minutes)
+- Proper HTTP 429 response with Retry-After header
+
+2.6 Caching (Redis)
+- Cache frequently accessed data (user profile, roles, etc.)
+- Cache invalidation strategy
+- Use Redis also for:
+  - Rate limit counters
+  - JWT blacklist
+  - Session-like data if needed
+
+2.7 Message Queue (RabbitMQ)
+- Asynchronous email sending
+- Background jobs
+- At least one producer and one consumer/worker
+- Proper acknowledgment and error handling
+- Dead Letter Queue concept (even if basic)
+
+2.8 Email Queue / Notification Service
+- Welcome email on registration
+- Password reset email
+- Role change notification (optional but good)
+- Emails must go through the queue (never send synchronously in request cycle)
+
+2.9 Audit Logs
+- Log important actions:
+  - Login / Logout
+  - Role changes
+  - Password changes
+  - Billing-related events
+- Store: userId, action, IP, user-agent, timestamp, metadata
+- Queryable by admin
+
+2.10 Health Checks
+- /health endpoint
+- Checks status of:
+  - PostgreSQL connection
+  - Redis connection
+  - RabbitMQ connection
+- Return proper status codes and detailed response
+
+2.11 Metrics & Observability
+- Prometheus metrics endpoint
+- Key metrics:
+  - HTTP request count
+  - Request latency (histogram)
+  - Error rate
+  - Queue job success/failure
+- Grafana dashboard (basic) or at least clear Prometheus queries
+
+2.12 API Documentation
+- Full OpenAPI / Swagger documentation
+- All endpoints documented with:
+  - Request/response schemas
+  - Authentication requirements
+  - Example values
+
+2.13 Docker & Docker Compose
+- Dockerfile for the application
+- docker-compose.yml that starts:
+  - Application
+  - PostgreSQL
+  - Redis
+  - RabbitMQ
+  - Prometheus
+  - Grafana (optional but recommended)
+- One command to run the entire stack
+
+2.14 CI/CD
+- GitHub Actions pipeline
+- Stages:
+  - Lint
+  - Unit / Integration tests
+  - Build Docker image
+- Optional: push image or deploy step
+
+
+================================================================================
+3. STRONGLY RECOMMENDED FEATURES
+================================================================================
+
+- User Service: full CRUD for users + profile management
+- Billing Service (basic):
+  - Plans table
+  - User subscription status
+  - Mock payment webhook
+- Structured logging (JSON logs)
+- Centralized error handling middleware
+- Input validation on every endpoint
+- Database migrations
+- Seed data script
+- Postman / Insomnia collection
+- Environment-based configuration (.env + validation)
+- Graceful shutdown
+
+
+================================================================================
+4. OPTIONAL / NICE-TO-HAVE (Can skip for strong MVP)
+================================================================================
+
+- Elasticsearch for advanced log search or full-text search
+- Multiple real microservices communicating via HTTP or gRPC
+- Real Stripe integration
+- Multi-tenancy support
+- WebSockets / real-time features
+- Advanced fraud / geo / IP reputation checks
+- Horizontal scaling demonstration
+- Kubernetes manifests
+
+
+================================================================================
+5. DATABASE DESIGN (Core Tables)
+================================================================================
+
+users
+- id (UUID)
+- email (unique)
+- password_hash (nullable if pure OAuth)
+- name
+- role_id
+- is_active
+- created_at / updated_at
+
+roles
+- id
+- name (admin, moderator, user)
+- description
+
+permissions (optional but good)
+- id
+- name
+- description
+
+role_permissions
+- role_id
+- permission_id
+
+oauth_accounts
+- id
+- user_id
+- provider (google, github)
+- provider_user_id
+- access_token (encrypted if stored)
+- refresh_token
+
+refresh_tokens
+- id
+- user_id
+- token_hash
+- expires_at
+- revoked
+
+audit_logs
+- id
+- user_id (nullable)
+- action
+- ip_address
+- user_agent
+- metadata (JSONB)
+- created_at
+
+plans (for basic billing)
+- id
+- name
+- price
+- features (JSONB)
+
+subscriptions
+- id
+- user_id
+- plan_id
+- status
+- current_period_end
+
+
+================================================================================
+6. KEY API ENDPOINTS (Minimum Set)
+================================================================================
+
+Auth
+- POST   /auth/register
+- POST   /auth/login
+- POST   /auth/refresh
+- POST   /auth/logout
+- POST   /auth/forgot-password
+- POST   /auth/reset-password
+- GET    /auth/oauth/google (or github)
+- GET    /auth/oauth/callback
+
+Users
+- GET    /users/me
+- PATCH  /users/me
+- GET    /users          (Admin)
+- PATCH  /users/:id/role (Admin)
+- DELETE /users/:id      (Admin)
+
+Health & Metrics
+- GET    /health
+- GET    /metrics
+
+Admin / Audit
+- GET    /audit-logs     (Admin)
+
+Billing (basic)
+- GET    /billing/plans
+- GET    /billing/subscription
+- POST   /billing/webhook (mock)
+
+
+================================================================================
+7. MVP IMPLEMENTATION PHASES
+================================================================================
+
+Phase 1 – Foundation (Core)
+1. Project structure + configuration
+2. PostgreSQL + migrations + User & Role models
+3. JWT Auth (register, login, refresh, logout)
+4. RBAC guards
+5. Redis integration (blacklist + rate limiting)
+6. API Gateway style middleware
+7. Health check
+8. Swagger
+9. Docker Compose (app + postgres + redis + rabbitmq)
+
+Phase 2 – Async & Observability
+10. RabbitMQ + Email worker
+11. Welcome + password reset emails via queue
+12. Audit logging middleware
+13. Prometheus metrics
+14. Basic Grafana dashboard
+15. GitHub Actions CI
+
+Phase 3 – Polish
+16. OAuth (Google or GitHub)
+17. Basic Billing service
+18. Seed data + Postman collection
+19. Excellent README with architecture diagram
+20. Final testing & documentation
+
+
+================================================================================
+8. SUCCESS CRITERIA (When Project is Portfolio-Ready)
+================================================================================
+
+You should be able to say in an interview:
+
+"I built a production-style backend platform with JWT + OAuth authentication, 
+role-based access control, API Gateway pattern, Redis-backed rate limiting, 
+RabbitMQ-powered email queue, audit logging, Prometheus metrics, health checks, 
+full Docker Compose setup, and CI/CD pipeline."
+
+Additional proof points:
+- One-command startup via docker-compose
+- Working Swagger UI
+- Rate limiting demonstrable
+- Emails actually going through the queue
+- Metrics visible
+- Clean architecture that can be explained
+
+
+================================================================================
+9. README REQUIREMENTS
+================================================================================
+
+Your README must contain:
+- Project title + short description
+- Architecture diagram (draw.io / excalidraw / mermaid)
+- Features list
+- Tech stack
+- How to run (docker-compose up)
+- Environment variables explanation
+- API documentation link (Swagger)
+- Screenshots of:
+  - Swagger
+  - Grafana / metrics
+  - Successful rate-limit response
+- Future improvements section
+
+
+================================================================================
+END OF PROJECT REQUIREMENTS
+================================================================================
