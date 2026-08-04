@@ -9,6 +9,36 @@ export class WorkflowController {
     private readonly queueService: QueueService,
   ) {}
 
+  @Get('health')
+  health() {
+    return { service: 'workflow-service', status: 'ok', timestamp: new Date().toISOString() };
+  }
+
+  @Get('metrics/queue')
+  async getQueueMetrics() {
+    return this.queueService.getMetrics();
+  }
+
+  @Get('dlq/jobs')
+  async getDlqJobs() {
+    return this.queueService.getDlqJobs();
+  }
+
+  @Post('dlq/:jobId/retry')
+  async retryDlqJob(@Param('jobId') jobId: string) {
+    return this.queueService.replayDlqJob(jobId);
+  }
+
+  @Get('executions/:id')
+  async getExecution(@Param('id') id: string) {
+    const execution = await this.prisma.workflowExecution.findUnique({
+      where: { id },
+      include: { workflow: true, logs: { orderBy: { createdAt: 'asc' } } },
+    });
+    if (!execution) throw new NotFoundException('Execution not found');
+    return execution;
+  }
+
   @Post()
   async createWorkflow(@Body() body: any) {
     const { name, description, triggerType, createdById, tenantId, steps } = body;
@@ -81,35 +111,5 @@ export class WorkflowController {
       status: execution.status,
       queue: queueResult,
     };
-  }
-
-  @Get('executions/:id')
-  async getExecution(@Param('id') id: string) {
-    const execution = await this.prisma.workflowExecution.findUnique({
-      where: { id },
-      include: { workflow: true, logs: { orderBy: { createdAt: 'asc' } } },
-    });
-    if (!execution) throw new NotFoundException('Execution not found');
-    return execution;
-  }
-
-  @Get('metrics/queue')
-  async getQueueMetrics() {
-    return this.queueService.getMetrics();
-  }
-
-  @Get('dlq/jobs')
-  async getDlqJobs() {
-    return this.queueService.getDlqJobs();
-  }
-
-  @Post('dlq/:jobId/retry')
-  async retryDlqJob(@Param('jobId') jobId: string) {
-    return this.queueService.replayDlqJob(jobId);
-  }
-
-  @Get('health')
-  health() {
-    return { service: 'workflow-service', status: 'ok', timestamp: new Date().toISOString() };
   }
 }
