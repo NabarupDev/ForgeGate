@@ -1,5 +1,6 @@
 import { Injectable, OnModuleInit, OnModuleDestroy } from '@nestjs/common';
 import { Worker, Job } from 'bullmq';
+import Redis from 'ioredis';
 import { StructuredLogger } from '@forgegate/logger';
 
 @Injectable()
@@ -8,8 +9,14 @@ export class NotificationWorker implements OnModuleInit, OnModuleDestroy {
   private logger = new StructuredLogger('notification-service');
 
   onModuleInit() {
-    const redisHost = process.env.REDIS_HOST || 'localhost';
-    const redisPort = parseInt(process.env.REDIS_PORT || '6379', 10);
+    const connection = process.env.REDIS_URL
+      ? new Redis(process.env.REDIS_URL, { maxRetriesPerRequest: null })
+      : {
+          host: process.env.REDIS_HOST || 'localhost',
+          port: parseInt(process.env.REDIS_PORT || '6379', 10),
+          password: process.env.REDIS_PASSWORD || undefined,
+          maxRetriesPerRequest: null,
+        };
 
     this.worker = new Worker(
       'notification-events',
@@ -34,7 +41,7 @@ export class NotificationWorker implements OnModuleInit, OnModuleDestroy {
         return { status: 'DELIVERED', recipient, deliveredAt: new Date().toISOString() };
       },
       {
-        connection: { host: redisHost, port: redisPort },
+        connection,
         concurrency: 10,
       },
     );

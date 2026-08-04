@@ -15,6 +15,7 @@
     "@nestjs/platform-express": "^10.4.22",
     "amqplib": "^0.10.9",
     "bullmq": "^5.41.6",
+    "dotenv": "^16.4.7",
     "ioredis": "^5.11.1",
     "reflect-metadata": "^0.2.2",
     "rxjs": "^7.8.2"

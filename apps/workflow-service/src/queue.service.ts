@@ -1,5 +1,6 @@
 import { Injectable, OnModuleInit, OnModuleDestroy } from '@nestjs/common';
 import { Queue, Worker, QueueEvents, Job } from 'bullmq';
+import Redis from 'ioredis';
 import { WorkflowEngineService } from './workflow-engine.service';
 import { StructuredLogger } from '@forgegate/logger';
 
@@ -15,9 +16,14 @@ export class QueueService implements OnModuleInit, OnModuleDestroy {
   constructor(private readonly engineService: WorkflowEngineService) {}
 
   onModuleInit() {
-    const redisHost = process.env.REDIS_HOST || 'localhost';
-    const redisPort = parseInt(process.env.REDIS_PORT || '6379', 10);
-    const connection = { host: redisHost, port: redisPort };
+    const connection = process.env.REDIS_URL
+      ? new Redis(process.env.REDIS_URL, { maxRetriesPerRequest: null })
+      : {
+          host: process.env.REDIS_HOST || 'localhost',
+          port: parseInt(process.env.REDIS_PORT || '6379', 10),
+          password: process.env.REDIS_PASSWORD || undefined,
+          maxRetriesPerRequest: null,
+        };
 
     this.workflowQueue = new Queue('workflow-executions', { connection });
     this.dlqQueue = new Queue('workflow-dlq', { connection });

@@ -9,9 +9,14 @@ export class HealthController {
   private redis: Redis;
 
   constructor() {
-    const host = process.env.REDIS_HOST || 'localhost';
-    const port = parseInt(process.env.REDIS_PORT || '6379', 10);
-    this.redis = new Redis({ host, port, maxRetriesPerRequest: 1 });
+    if (process.env.REDIS_URL) {
+      this.redis = new Redis(process.env.REDIS_URL, { maxRetriesPerRequest: 1 });
+    } else {
+      const host = process.env.REDIS_HOST || 'localhost';
+      const port = parseInt(process.env.REDIS_PORT || '6379', 10);
+      const password = process.env.REDIS_PASSWORD || undefined;
+      this.redis = new Redis({ host, port, password, maxRetriesPerRequest: 1 });
+    }
   }
 
   @Get()
