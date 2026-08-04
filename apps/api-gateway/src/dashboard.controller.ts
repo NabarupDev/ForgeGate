@@ -13,7 +13,7 @@ export class DashboardController {
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>ForgeGate - Admin & Workflow Engine Dashboard</title>
+  <title>ForgeGate - Microservice & Workflow Engine Dashboard</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
@@ -74,33 +74,34 @@ export class DashboardController {
   <header>
     <div class="logo">
       <span>ForgeGate</span>
-      <span class="badge">Distributed Workflow Platform</span>
+      <span class="badge">Microservice Ecosystem</span>
     </div>
     <div style="display: flex; gap: 1rem; align-items: center;">
-      <span id="liveStatus"><span class="status-dot dot-green"></span>System Operational</span>
+      <a href="/api/v1/docs" target="_blank" class="btn btn-secondary" style="text-decoration: none;">Open Swagger Docs</a>
+      <span id="liveStatus"><span class="status-dot dot-green"></span>Checking Status...</span>
       <button class="btn btn-secondary" onclick="fetchDashboardData()">Refresh</button>
     </div>
   </header>
 
   <div class="metrics-grid">
     <div class="card">
-      <div class="card-title">Active Workflows</div>
-      <div class="card-value" id="valActiveWf">12</div>
-      <div class="card-desc">Running across 2 tenants</div>
+      <div class="card-title">Active Queue Workflows</div>
+      <div class="card-value" id="valActiveWf" style="color: var(--accent-blue);">0</div>
+      <div class="card-desc">Active BullMQ workflow jobs</div>
     </div>
     <div class="card">
-      <div class="card-title">BullMQ Queue Size</div>
-      <div class="card-value" id="valQueueSize" style="color: var(--accent-blue);">3</div>
-      <div class="card-desc">Jobs in waiting & active state</div>
+      <div class="card-title">Waiting Jobs</div>
+      <div class="card-value" id="valQueueSize" style="color: var(--accent-cyan);">0</div>
+      <div class="card-desc">Enqueued execution queue</div>
     </div>
     <div class="card">
-      <div class="card-title">Retry Count</div>
-      <div class="card-value" id="valRetryCount" style="color: var(--warning);">2</div>
-      <div class="card-desc">Exponential backoff attempts</div>
+      <div class="card-title">Completed Executions</div>
+      <div class="card-value" id="valCompletedJobs" style="color: var(--success);">0</div>
+      <div class="card-desc">Processed workflow jobs</div>
     </div>
     <div class="card">
       <div class="card-title">Dead-Letter Queue (DLQ)</div>
-      <div class="card-value" id="valDlqCount" style="color: var(--danger);">1</div>
+      <div class="card-value" id="valDlqCount" style="color: var(--danger);">0</div>
       <div class="card-desc">Exhausted failure queue</div>
     </div>
   </div>
@@ -109,25 +110,21 @@ export class DashboardController {
     <div class="panel">
       <div class="panel-title">
         <span>Dead Letter Queue (DLQ) Inspector</span>
-        <span class="badge" style="background: rgba(239,68,68,0.15); color: #f87171; border-color: rgba(239,68,68,0.3)">Requires Attention</span>
+        <span class="badge" id="dlqBadge" style="background: rgba(16,185,129,0.15); color: #34d399; border-color: rgba(16,185,129,0.3)">All Queues Clean</span>
       </div>
       <table>
         <thead>
           <tr>
+            <th>Job ID</th>
             <th>Execution ID</th>
             <th>Tenant</th>
             <th>Error Reason</th>
-            <th>Failed At</th>
             <th>Action</th>
           </tr>
         </thead>
         <tbody id="dlqTableBody">
           <tr>
-            <td>exec-9081a2</td>
-            <td>acme-corp</td>
-            <td>HTTP 500: Internal Target Error</td>
-            <td>13:52:10</td>
-            <td><button class="btn" onclick="replayDlq('job-1')">Replay Job</button></td>
+            <td colspan="5" style="text-align: center; color: var(--text-muted);">No jobs currently in Dead Letter Queue</td>
           </tr>
         </tbody>
       </table>
@@ -136,26 +133,26 @@ export class DashboardController {
     <div class="panel">
       <div class="panel-title">Microservice Cluster Status</div>
       <table style="font-family: inherit;">
-        <tbody>
+        <tbody id="clusterTable">
           <tr>
             <td><span class="status-dot dot-green"></span>API Gateway</td>
             <td style="color: var(--success);">Healthy</td>
             <td style="color: var(--text-muted);">Port 3000</td>
           </tr>
           <tr>
-            <td><span class="status-dot dot-green"></span>Auth Service</td>
-            <td style="color: var(--success);">Healthy</td>
-            <td style="color: var(--text-muted);">JWT/Redis</td>
+            <td><span class="status-dot dot-amber"></span>Auth Service</td>
+            <td style="color: var(--warning);">Connecting...</td>
+            <td style="color: var(--text-muted);">Port 3001</td>
           </tr>
           <tr>
-            <td><span class="status-dot dot-green"></span>Workflow Engine</td>
-            <td style="color: var(--success);">Healthy</td>
-            <td style="color: var(--text-muted);">BullMQ Worker</td>
+            <td><span class="status-dot dot-amber"></span>Workflow Engine</td>
+            <td style="color: var(--warning);">Connecting...</td>
+            <td style="color: var(--text-muted);">Port 3002</td>
           </tr>
           <tr>
-            <td><span class="status-dot dot-green"></span>Notification Worker</td>
-            <td style="color: var(--success);">Healthy</td>
-            <td style="color: var(--text-muted);">Async Consumer</td>
+            <td><span class="status-dot dot-amber"></span>Notification Worker</td>
+            <td style="color: var(--warning);">Connecting...</td>
+            <td style="color: var(--text-muted);">Port 3003</td>
           </tr>
         </tbody>
       </table>
@@ -163,30 +160,112 @@ export class DashboardController {
   </div>
 
   <div class="panel" style="margin-top: 1.5rem;">
-    <div class="panel-title">Structured JSON System Log Stream</div>
+    <div class="panel-title">Real-Time Event Audit Stream</div>
     <div class="log-stream" id="logStream">
-      <div class="log-line"><span class="log-time">[13:53:01]</span> <span class="log-service">[API-Gateway]</span> GET /api/v1/workflows 200 - 12ms</div>
-      <div class="log-line"><span class="log-time">[13:53:05]</span> <span class="log-service">[workflow-engine]</span> step_1 HTTP_REQUEST executed output={"status":200} durationMs=45</div>
-      <div class="log-line"><span class="log-time">[13:53:06]</span> <span class="log-service">[workflow-engine]</span> state_transition executionId=exec-9081a2 status="completed"</div>
+      <div class="log-line"><span class="log-time">[` + new Date().toLocaleTimeString() + `]</span> <span class="log-service">[API-Gateway]</span> Real-time monitoring console initialized</div>
     </div>
   </div>
 
   <script>
+    function addLogLine(service, msg) {
+      const stream = document.getElementById('logStream');
+      const time = new Date().toLocaleTimeString();
+      const div = document.createElement('div');
+      div.className = 'log-line';
+      div.innerHTML = '<span class="log-time">[' + time + ']</span> <span class="log-service">[' + service + ']</span> ' + msg;
+      stream.appendChild(div);
+      stream.scrollTop = stream.scrollHeight;
+    }
+
     async function fetchDashboardData() {
       try {
         const res = await fetch('/api/v1/health');
         const data = await res.json();
-        console.log('Health data:', data);
+        
+        const overall = data.status || 'degraded';
+        const liveStatusEl = document.getElementById('liveStatus');
+        if (overall === 'healthy') {
+          liveStatusEl.innerHTML = '<span class="status-dot dot-green"></span>System Operational';
+        } else {
+          liveStatusEl.innerHTML = '<span class="status-dot dot-amber"></span>System Degraded';
+        }
+
+        const s = data.services || {};
+        const getRow = (name, port, sObj) => {
+          const isUp = sObj && sObj.status === 'up';
+          const dot = isUp ? 'dot-green' : 'dot-red';
+          const txt = isUp ? 'Healthy' : 'Down';
+          const clr = isUp ? 'var(--success)' : 'var(--danger)';
+          return '<tr><td><span class="status-dot ' + dot + '"></span>' + name + '</td><td style="color: ' + clr + ';">' + txt + '</td><td style="color: var(--text-muted);">' + port + '</td></tr>';
+        };
+
+        document.getElementById('clusterTable').innerHTML = 
+          getRow('API Gateway', 'Port 3000', { status: 'up' }) +
+          getRow('Auth Service', 'Port 3001', s.authService) +
+          getRow('Workflow Engine', 'Port 3002', s.workflowService) +
+          getRow('Notification Worker', 'Port 3003', s.notificationService);
+
+        // Fetch Queue Metrics
+        const mRes = await fetch('/api/v1/workflows/metrics/queue');
+        if (mRes.ok) {
+          const mData = await mRes.json();
+          document.getElementById('valActiveWf').innerText = mData.activeJobs || 0;
+          document.getElementById('valQueueSize').innerText = mData.waitingJobs || 0;
+          document.getElementById('valCompletedJobs').innerText = mData.completedJobs || 0;
+          document.getElementById('valDlqCount').innerText = mData.dlqCount || 0;
+        }
+
+        // Fetch DLQ Jobs
+        const dlqRes = await fetch('/api/v1/workflows/dlq/jobs');
+        if (dlqRes.ok) {
+          const jobs = await dlqRes.json();
+          const tbody = document.getElementById('dlqTableBody');
+          const badge = document.getElementById('dlqBadge');
+
+          if (!jobs || jobs.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="5" style="text-align: center; color: var(--text-muted);">No jobs currently in Dead Letter Queue</td></tr>';
+            badge.style.background = 'rgba(16,185,129,0.15)';
+            badge.style.color = '#34d399';
+            badge.style.borderColor = 'rgba(16,185,129,0.3)';
+            badge.innerText = 'All Queues Clean';
+          } else {
+            badge.style.background = 'rgba(239,68,68,0.15)';
+            badge.style.color = '#f87171';
+            badge.style.borderColor = 'rgba(239,68,68,0.3)';
+            badge.innerText = jobs.length + ' Jobs Require Attention';
+
+            tbody.innerHTML = jobs.map(j => 
+              '<tr>' +
+                '<td>' + j.id + '</td>' +
+                '<td>' + (j.data.executionId || 'N/A') + '</td>' +
+                '<td>' + (j.data.tenantId || 'N/A') + '</td>' +
+                '<td style="color: var(--danger);">' + (j.failedReason || j.data.errorReason || 'Execution exhausted retries') + '</td>' +
+                '<td><button class="btn" onclick="replayDlq(\'' + j.id + '\')">Replay Job</button></td>' +
+              '</tr>'
+            ).join('');
+          }
+        }
       } catch (e) {
-        console.log('Fetching live stats...');
+        addLogLine('Dashboard', 'Polled health update error: ' + e.message);
       }
     }
 
     async function replayDlq(jobId) {
-      alert('Replaying DLQ Job: ' + jobId + '...');
+      try {
+        const res = await fetch('/api/v1/workflows/dlq/' + jobId + '/retry', { method: 'POST' });
+        if (res.ok) {
+          addLogLine('DLQ-Replay', 'Successfully replayed DLQ Job ' + jobId);
+          fetchDashboardData();
+        } else {
+          alert('Failed to replay DLQ Job');
+        }
+      } catch (e) {
+        alert('Replay error: ' + e.message);
+      }
     }
 
-    setInterval(fetchDashboardData, 5000);
+    fetchDashboardData();
+    setInterval(fetchDashboardData, 4000);
   </script>
 </body>
 </html>`;
