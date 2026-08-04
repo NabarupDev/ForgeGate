@@ -3,6 +3,7 @@ export declare class NotificationController {
         service: string;
         workerQueue: string;
         status: string;
+        timestamp: string;
     };
 }
 export declare class AppModule {

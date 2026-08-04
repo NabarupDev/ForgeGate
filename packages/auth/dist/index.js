@@ -15,4 +15,5 @@ var __exportStar = (this && this.__exportStar) || function(m, exports) {
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 __exportStar(require("./decorators/roles.decorator"), exports);
+__exportStar(require("./interfaces/jwt-payload.interface"), exports);
 //# sourceMappingURL=index.js.map

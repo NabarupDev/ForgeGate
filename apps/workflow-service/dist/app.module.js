@@ -5,56 +5,25 @@ var __decorate = (this && this.__decorate) || function (decorators, target, key,
     else for (var i = decorators.length - 1; i >= 0; i--) if (d = decorators[i]) r = (c < 3 ? d(r) : c > 3 ? d(target, key, r) : d(target, key)) || r;
     return c > 3 && r && Object.defineProperty(target, key, r), r;
 };
-var __metadata = (this && this.__metadata) || function (k, v) {
-    if (typeof Reflect === "object" && typeof Reflect.metadata === "function") return Reflect.metadata(k, v);
-};
-var __param = (this && this.__param) || function (paramIndex, decorator) {
-    return function (target, key) { decorator(target, key, paramIndex); }
-};
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.AppModule = exports.WorkflowController = void 0;
+exports.AppModule = void 0;
 const common_1 = require("@nestjs/common");
-let WorkflowController = class WorkflowController {
-    createWorkflow(dto) {
-        return { id: 'wf-123456', name: dto.name, status: 'active', stepsCount: dto.steps?.length || 0 };
-    }
-    triggerExecution(id) {
-        return { executionId: 'exec-987654', workflowId: id, status: 'queued', retryPolicy: 'backoff_exponential' };
-    }
-    health() {
-        return { service: 'workflow-service', engine: 'BullMQ/Redis', status: 'ok' };
-    }
-};
-exports.WorkflowController = WorkflowController;
-__decorate([
-    (0, common_1.Post)(),
-    __param(0, (0, common_1.Body)()),
-    __metadata("design:type", Function),
-    __metadata("design:paramtypes", [Object]),
-    __metadata("design:returntype", void 0)
-], WorkflowController.prototype, "createWorkflow", null);
-__decorate([
-    (0, common_1.Post)(':id/execute'),
-    __param(0, (0, common_1.Param)('id')),
-    __metadata("design:type", Function),
-    __metadata("design:paramtypes", [String]),
-    __metadata("design:returntype", void 0)
-], WorkflowController.prototype, "triggerExecution", null);
-__decorate([
-    (0, common_1.Get)('health'),
-    __metadata("design:type", Function),
-    __metadata("design:paramtypes", []),
-    __metadata("design:returntype", void 0)
-], WorkflowController.prototype, "health", null);
-exports.WorkflowController = WorkflowController = __decorate([
-    (0, common_1.Controller)('workflows')
-], WorkflowController);
+const config_1 = require("@nestjs/config");
+const prisma_service_1 = require("./prisma.service");
+const workflow_engine_service_1 = require("./workflow-engine.service");
+const queue_service_1 = require("./queue.service");
+const workflow_controller_1 = require("./workflow.controller");
 let AppModule = class AppModule {
 };
 exports.AppModule = AppModule;
 exports.AppModule = AppModule = __decorate([
     (0, common_1.Module)({
-        controllers: [WorkflowController],
+        imports: [
+            config_1.ConfigModule.forRoot({ isGlobal: true }),
+        ],
+        controllers: [workflow_controller_1.WorkflowController],
+        providers: [prisma_service_1.PrismaService, workflow_engine_service_1.WorkflowEngineService, queue_service_1.QueueService],
+        exports: [prisma_service_1.PrismaService, workflow_engine_service_1.WorkflowEngineService, queue_service_1.QueueService],
     })
 ], AppModule);
 //# sourceMappingURL=app.module.js.map

@@ -1,6 +1,16 @@
 import { Injectable, LoggerService as NestLoggerService } from '@nestjs/common';
 import * as winston from 'winston';
 
+export interface LogMetadata {
+  context?: string;
+  traceId?: string;
+  tenantId?: string;
+  workflowId?: string;
+  executionId?: string;
+  durationMs?: number;
+  [key: string]: any;
+}
+
 @Injectable()
 export class StructuredLogger implements NestLoggerService {
   private logger: winston.Logger;
@@ -10,6 +20,7 @@ export class StructuredLogger implements NestLoggerService {
       level: process.env.LOG_LEVEL || 'info',
       format: winston.format.combine(
         winston.format.timestamp(),
+        winston.format.errors({ stack: true }),
         winston.format.json(),
       ),
       defaultMeta: { service: serviceName },
@@ -19,23 +30,47 @@ export class StructuredLogger implements NestLoggerService {
     });
   }
 
-  log(message: string, context?: string) {
-    this.logger.info(message, { context });
+  log(message: any, contextOrMeta?: string | LogMetadata) {
+    if (typeof contextOrMeta === 'object') {
+      this.logger.info(message, contextOrMeta);
+    } else {
+      this.logger.info(message, { context: contextOrMeta });
+    }
   }
 
-  error(message: string, trace?: string, context?: string) {
-    this.logger.error(message, { trace, context });
+  error(message: any, trace?: string, contextOrMeta?: string | LogMetadata) {
+    if (typeof contextOrMeta === 'object') {
+      this.logger.error(message, { trace, ...contextOrMeta });
+    } else {
+      this.logger.error(message, { trace, context: contextOrMeta });
+    }
   }
 
-  warn(message: string, context?: string) {
-    this.logger.warn(message, { context });
+  warn(message: any, contextOrMeta?: string | LogMetadata) {
+    if (typeof contextOrMeta === 'object') {
+      this.logger.warn(message, contextOrMeta);
+    } else {
+      this.logger.warn(message, { context: contextOrMeta });
+    }
   }
 
-  debug(message: string, context?: string) {
-    this.logger.debug(message, { context });
+  debug(message: any, contextOrMeta?: string | LogMetadata) {
+    if (typeof contextOrMeta === 'object') {
+      this.logger.debug(message, contextOrMeta);
+    } else {
+      this.logger.debug(message, { context: contextOrMeta });
+    }
   }
 
-  verbose(message: string, context?: string) {
-    this.logger.verbose(message, { context });
+  verbose(message: any, contextOrMeta?: string | LogMetadata) {
+    if (typeof contextOrMeta === 'object') {
+      this.logger.verbose(message, contextOrMeta);
+    } else {
+      this.logger.verbose(message, { context: contextOrMeta });
+    }
+  }
+
+  logEvent(event: string, meta: LogMetadata) {
+    this.logger.info(event, meta);
   }
 }

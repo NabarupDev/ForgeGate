@@ -1,8 +1,8 @@
-# ForgeGate – Distributed Backend Workflow Platform
+# ForgeGate -- Distributed Backend Workflow Platform
 
-ForgeGate is a production-style, microservices-based distributed backend workflow execution platform. Built as a high-performance pnpm monorepo, it demonstrates system architecture patterns including API Gateway routing, distributed background job processing, state-machine workflow execution, structured JSON logging, Redis-backed caching, and containerized deployment.
+ForgeGate is a production-grade, microservices-based distributed backend workflow execution platform. Built as a high-performance pnpm monorepo, it demonstrates complex backend engineering design patterns including multi-tenancy, API Gateway routing, state-machine workflow step execution, BullMQ distributed background queues, exponential failure retries with Dead Letter Queue (DLQ) management, structured JSON logging, Redis-backed token revocation, and containerized deployment.
 
-Instead of a generic CRUD project, ForgeGate focuses on core backend engineering challenges: distributed job queue reliability, failure recovery, atomic workflow step execution, and microservice boundary isolation.
+Instead of a basic CRUD project, ForgeGate implements core distributed systems capabilities: fault-tolerant job processing, atomic workflow step transitions, tenant data isolation, real-time observability, and active monitoring.
 
 ---
 
@@ -11,14 +11,14 @@ Instead of a generic CRUD project, ForgeGate focuses on core backend engineering
 ```text
 ForgeGate/
 ├── apps/
-│   ├── api-gateway/          # Central ingress entry point, validation & swagger
-│   ├── auth-service/         # User authentication, JWT token rotation, RBAC
-│   ├── workflow-service/     # Workflow state engine & distributed job queue
+│   ├── api-gateway/          # Central ingress entry point, swagger, metrics & admin dashboard
+│   ├── auth-service/         # User authentication, multi-tenancy, JWT token revocation & RBAC
+│   ├── workflow-service/     # Workflow state engine, BullMQ retry queues & DLQ worker
 │   └── notification-service/ # Asynchronous email & event consumer worker
 ├── packages/
 │   ├── common/               # Shared DTOs, response interceptors, exception filters
-│   ├── logger/               # Structured JSON Winston logging module
-│   ├── auth/                 # Shared JWT strategies & RBAC decorators
+│   ├── logger/               # Structured JSON Winston logging module with trace correlation
+│   ├── auth/                 # Shared JWT strategies, tenant context & RBAC decorators
 │   └── config/               # Validated environment configuration schemas
 ├── infra/
 │   ├── docker/               # Dockerfiles & docker-compose orchestration
@@ -50,14 +50,15 @@ flowchart TD
 
     subgraph Data & Queue Infrastructure
         AuthService --> Redis[(Redis Cache & Revocation)]
-        AuthService --> Postgres[(PostgreSQL DB)]
+        AuthService --> Postgres[(PostgreSQL DB - Multi-Tenant)]
         WorkflowEngine --> Postgres
         WorkflowEngine --> Queue[BullMQ / Redis Job Queue]
     end
 
     subgraph Async Consumers
         Queue --> NotificationWorker[apps/notification-service]
-        Queue --> RetryEngine[Exponential Backoff Retry Queue]
+        Queue --> RetryEngine[Exponential Backoff Retry Engine]
+        RetryEngine --> DLQ[Dead Letter Queue - DLQ]
     end
 ```
 
@@ -65,24 +66,32 @@ flowchart TD
 
 ## Key Backend Features
 
-- **Microservice Architecture & Monorepo**:
-  - Managed via pnpm workspaces with clear service boundary separation.
-  - Shared internal npm packages (`@forgegate/common`, `@forgegate/logger`, `@forgegate/auth`, `@forgegate/config`).
-- **Distributed Workflow Execution Engine**:
-  - Asynchronous step execution engine with state transitions (`pending`, `running`, `completed`, `failed`).
-  - Distributed background queues powered by BullMQ / Redis.
-  - Automatic job retry queues with exponential backoff and dead-letter handling.
-- **Production Observability & Logging**:
-  - Structured JSON logging using Winston across all microservices.
-  - Multi-service health check endpoints monitoring PostgreSQL, Redis, and message brokers.
-  - Prometheus metrics collection (`/api/v1/metrics`).
-- **Security & Authorization**:
-  - JWT authentication with access/refresh token rotation.
-  - Immediate Redis token revocation / blacklist.
-  - Role-Based Access Control (RBAC) with custom route decorators.
-- **Infrastructure & Containerization**:
-  - Nginx API Gateway reverse proxy routing requests to downstream microservices.
-  - Fully containerized environment via Docker Compose.
+- **Multi-Tenant System Design**:
+  - Full data isolation across tenants (`Tenant` schema entity in Prisma).
+  - Multi-tenant authentication context propagating `tenantId` across API requests and background workers.
+  
+- **State-Machine Workflow Execution Engine**:
+  - Deterministic state transitions: `pending` -> `running` -> `retrying` -> `completed` / `failed`.
+  - Configurable step execution types: `http_request` (Axios calls), `data_transform` (JSON mapping), and `email_notification`.
+  - Step-by-step execution log persistence in PostgreSQL.
+
+- **Distributed Queues, Retries & Dead Letter Queue (DLQ)**:
+  - Background queue execution powered by BullMQ and Redis.
+  - Automatic exponential backoff retries for transient step failures.
+  - Dead Letter Queue (DLQ) routing for exhausted retries with manual/automated job replay APIs (`POST /api/v1/workflows/dlq/:jobId/retry`).
+
+- **Real-Time Admin Monitoring Dashboard & Metrics**:
+  - Built-in responsive dark-mode Admin Monitoring UI hosted at `/api/v1/dashboard`.
+  - Prometheus metrics exporter endpoint (`/api/v1/metrics`) exposing `workflow_duration_seconds`, `active_jobs_total`, `failed_jobs_total`, `queue_size`, and `http_requests_total`.
+  - Live DLQ inspection and cluster microservice health status.
+
+- **Security & Token Revocation**:
+  - Multi-tenant JWT authentication with access/refresh token pairs.
+  - Immediate Redis token revocation blacklist upon user logout.
+  - Role-Based Access Control (RBAC) with custom route guards.
+
+- **Production Observability & Structured JSON Logging**:
+  - Winston structured JSON logging (`@forgegate/logger`) with trace IDs, tenant IDs, workflow IDs, execution IDs, and duration metrics.
 
 ---
 
@@ -95,9 +104,8 @@ flowchart TD
 | **Backend Framework** | NestJS |
 | **Database & ORM** | PostgreSQL 16, Prisma ORM |
 | **Cache & Distributed Queue** | Redis 7, BullMQ, ioredis |
-| **Message Broker** | RabbitMQ 3 |
 | **Reverse Proxy** | Nginx |
-| **Logging & Metrics** | Winston (JSON), Prometheus |
+| **Logging & Metrics** | Winston (Structured JSON), Prometheus (prom-client) |
 | **Containerization** | Docker, Docker Compose |
 
 ---
@@ -128,15 +136,15 @@ flowchart TD
    cp .env.example .env
    ```
 
-4. **Start Infrastructure Containers (PostgreSQL, Redis, RabbitMQ, Prometheus)**:
+4. **Start Infrastructure Containers (PostgreSQL, Redis, Prometheus)**:
    ```bash
    pnpm run docker:up
    ```
 
-5. **Generate Database Client & Run Migrations**:
+5. **Generate Database Client & Seed Database**:
    ```bash
    pnpm run prisma:generate
-   pnpm run prisma:migrate
+   pnpm run prisma:seed
    ```
 
 6. **Build All Workspace Packages & Microservices**:
@@ -146,36 +154,12 @@ flowchart TD
 
 ---
 
-## Docker Deployment
+## Active Endpoints
 
-To launch the entire platform (Nginx Gateway, API Gateway, Microservices, Databases, and Queue workers) with a single command:
-
-```bash
-docker-compose -f infra/docker/docker-compose.yml up --build -d
-```
-
-### Active Endpoints
-
-- **Nginx Ingress / API Gateway**: `http://localhost/api/v1`
-- **Swagger OpenAPI Documentation**: `http://localhost/api/v1/docs`
-- **Gateway Health Endpoint**: `http://localhost/api/v1/health`
-- **Prometheus Metrics**: `http://localhost:9090`
-- **RabbitMQ Management Console**: `http://localhost:15672` (guest / guest)
-
----
-
-## API Documentation
-
-Swagger OpenAPI 3.0 specs are aggregated at the API Gateway level.
-
-- Interactive API Spec: [http://localhost/api/v1/docs](http://localhost/api/v1/docs)
-- Static OpenAPI File: [docs/api/openapi-spec.json](docs/api/openapi-spec.json)
-
----
-
-## Screenshots
-
-*(Place system monitoring dashboards, Swagger UI, and Redis execution log screenshots here)*
+- **Admin Monitoring Dashboard**: `http://localhost:3000/api/v1/dashboard`
+- **Swagger OpenAPI Documentation**: `http://localhost:3000/api/v1/docs`
+- **Prometheus Metrics**: `http://localhost:3000/api/v1/metrics`
+- **Gateway Health Endpoint**: `http://localhost:3000/api/v1/health`
 
 ---
 
@@ -184,16 +168,16 @@ Swagger OpenAPI 3.0 specs are aggregated at the API Gateway level.
 When presenting ForgeGate on a backend engineering resume:
 
 ```text
-ForgeGate – Distributed Backend Workflow Platform
-- Designed a microservices architecture with an API Gateway, authentication service, and asynchronous job processing using BullMQ and Redis.
-- Built secure JWT authentication with RBAC, request validation, Redis-backed token revocation, and centralized JSON logging.
-- Containerized microservices using Docker Compose and documented endpoints using Swagger OpenAPI specs.
+ForgeGate -- Distributed Backend Workflow Platform
+- Designed a multi-tenant microservices architecture with NestJS, pnpm workspaces, PostgreSQL, and Redis.
+- Built a state-machine workflow engine executing multi-step HTTP/transformation tasks with status tracking.
+- Implemented BullMQ distributed job queues with exponential backoff retries and Dead-Letter Queue (DLQ) replay capabilities.
+- Developed an Admin Monitoring Dashboard and exposed Prometheus metrics (queue depth, execution duration, failure rates).
+- Enforced multi-tenancy isolation, JWT authentication, Redis token revocation blacklisting, and structured JSON logging.
 ```
 
 ---
 
-## Future Improvements
+## License
 
-- Implement multi-tenant workflow isolation for secure workspace execution.
-- Add OpenTelemetry distributed tracing across HTTP microservice boundaries.
-- Build visual workflow builder web UI.
+MIT

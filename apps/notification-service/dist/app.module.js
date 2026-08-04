@@ -11,9 +11,11 @@ var __metadata = (this && this.__metadata) || function (k, v) {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.AppModule = exports.NotificationController = void 0;
 const common_1 = require("@nestjs/common");
+const config_1 = require("@nestjs/config");
+const notification_worker_1 = require("./notification.worker");
 let NotificationController = class NotificationController {
     health() {
-        return { service: 'notification-service', workerQueue: 'rabbitmq', status: 'ok' };
+        return { service: 'notification-service', workerQueue: 'BullMQ/Redis', status: 'ok', timestamp: new Date().toISOString() };
     }
 };
 exports.NotificationController = NotificationController;
@@ -31,7 +33,9 @@ let AppModule = class AppModule {
 exports.AppModule = AppModule;
 exports.AppModule = AppModule = __decorate([
     (0, common_1.Module)({
+        imports: [config_1.ConfigModule.forRoot({ isGlobal: true })],
         controllers: [NotificationController],
+        providers: [notification_worker_1.NotificationWorker],
     })
 ], AppModule);
 //# sourceMappingURL=app.module.js.map

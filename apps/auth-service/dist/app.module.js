@@ -14,15 +14,30 @@ var __param = (this && this.__param) || function (paramIndex, decorator) {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.AppModule = exports.AuthController = void 0;
 const common_1 = require("@nestjs/common");
+const jwt_1 = require("@nestjs/jwt");
+const config_1 = require("@nestjs/config");
+const prisma_service_1 = require("./prisma.service");
+const redis_service_1 = require("./redis.service");
+const auth_service_1 = require("./auth.service");
 let AuthController = class AuthController {
-    register(body) {
-        return { status: 'registered', email: body.email };
+    constructor(authService) {
+        this.authService = authService;
     }
-    login(body) {
-        return { accessToken: 'jwt-access-token-placeholder', refreshToken: 'jwt-refresh-token-placeholder' };
+    async register(body) {
+        return this.authService.register(body);
+    }
+    async login(body) {
+        return this.authService.login(body);
+    }
+    async logout(authHeader, body) {
+        const token = authHeader ? authHeader.replace('Bearer ', '') : '';
+        return this.authService.revokeToken(token, body.userId);
+    }
+    async verify(body) {
+        return this.authService.verifyToken(body.token);
     }
     health() {
-        return { service: 'auth-service', status: 'ok' };
+        return { service: 'auth-service', status: 'ok', timestamp: new Date().toISOString() };
     }
 };
 exports.AuthController = AuthController;
@@ -31,15 +46,30 @@ __decorate([
     __param(0, (0, common_1.Body)()),
     __metadata("design:type", Function),
     __metadata("design:paramtypes", [Object]),
-    __metadata("design:returntype", void 0)
+    __metadata("design:returntype", Promise)
 ], AuthController.prototype, "register", null);
 __decorate([
     (0, common_1.Post)('login'),
     __param(0, (0, common_1.Body)()),
     __metadata("design:type", Function),
     __metadata("design:paramtypes", [Object]),
-    __metadata("design:returntype", void 0)
+    __metadata("design:returntype", Promise)
 ], AuthController.prototype, "login", null);
+__decorate([
+    (0, common_1.Post)('logout'),
+    __param(0, (0, common_1.Headers)('authorization')),
+    __param(1, (0, common_1.Body)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [String, Object]),
+    __metadata("design:returntype", Promise)
+], AuthController.prototype, "logout", null);
+__decorate([
+    (0, common_1.Post)('verify'),
+    __param(0, (0, common_1.Body)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object]),
+    __metadata("design:returntype", Promise)
+], AuthController.prototype, "verify", null);
 __decorate([
     (0, common_1.Get)('health'),
     __metadata("design:type", Function),
@@ -47,14 +77,24 @@ __decorate([
     __metadata("design:returntype", void 0)
 ], AuthController.prototype, "health", null);
 exports.AuthController = AuthController = __decorate([
-    (0, common_1.Controller)('auth')
+    (0, common_1.Controller)('auth'),
+    __metadata("design:paramtypes", [auth_service_1.AuthService])
 ], AuthController);
 let AppModule = class AppModule {
 };
 exports.AppModule = AppModule;
 exports.AppModule = AppModule = __decorate([
     (0, common_1.Module)({
+        imports: [
+            config_1.ConfigModule.forRoot({ isGlobal: true }),
+            jwt_1.JwtModule.register({
+                secret: process.env.JWT_SECRET || 'super-secret-forgegate-key',
+                signOptions: { expiresIn: '15m' },
+            }),
+        ],
         controllers: [AuthController],
+        providers: [prisma_service_1.PrismaService, redis_service_1.RedisService, auth_service_1.AuthService],
+        exports: [auth_service_1.AuthService, prisma_service_1.PrismaService, redis_service_1.RedisService],
     })
 ], AppModule);
 //# sourceMappingURL=app.module.js.map

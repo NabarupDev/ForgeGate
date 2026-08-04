@@ -9,8 +9,25 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+model Tenant {
+  id        String   @id @default(uuid())
+  name      String
+  slug      String   @unique
+  isActive  Boolean  @default(true) @map("is_active")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  users         User[]
+  workflows     Workflow[]
+  subscriptions Subscription[]
+  auditLogs     AuditLog[]
+
+  @@map("tenants")
+}
+
 model User {
   id           String   @id @default(uuid())
+  tenantId     String   @map("tenant_id")
   email        String   @unique
   passwordHash String?  @map("password_hash")
   name         String
@@ -19,6 +36,7 @@ model User {
   createdAt    DateTime @default(now()) @map("created_at")
   updatedAt    DateTime @updatedAt @map("updated_at")
 
+  tenant             Tenant              @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   role               Role                @relation(fields: [roleId], references: [id])
   oauthAccounts      OAuthAccount[]
   refreshTokens      RefreshToken[]
@@ -89,6 +107,7 @@ model RefreshToken {
 
 model Workflow {
   id          String   @id @default(uuid())
+  tenantId    String   @map("tenant_id")
   name        String
   description String?
   triggerType String   @default("webhook") @map("trigger_type") // 'webhook', 'cron', 'event'
@@ -97,6 +116,7 @@ model Workflow {
   createdAt   DateTime @default(now()) @map("created_at")
   updatedAt   DateTime @updatedAt @map("updated_at")
 
+  tenant     Tenant              @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   createdBy  User                @relation("UserWorkflows", fields: [createdById], references: [id])
   steps      WorkflowStep[]
   executions WorkflowExecution[]
@@ -120,6 +140,7 @@ model WorkflowStep {
 model WorkflowExecution {
   id          String    @id @default(uuid())
   workflowId  String    @map("workflow_id")
+  tenantId    String    @map("tenant_id")
   status      String    @default("pending") // 'pending', 'running', 'completed', 'failed', 'retrying'
   currentStep Int       @default(1) @map("current_step")
   metadata    Json?
@@ -148,6 +169,7 @@ model ExecutionLog {
 
 model AuditLog {
   id        String   @id @default(uuid())
+  tenantId  String?  @map("tenant_id")
   userId    String?  @map("user_id")
   action    String
   ipAddress String?  @map("ip_address")
@@ -155,19 +177,22 @@ model AuditLog {
   metadata  Json?
   createdAt DateTime @default(now()) @map("created_at")
 
-  user User? @relation(fields: [userId], references: [id], onDelete: SetNull)
+  tenant Tenant? @relation(fields: [tenantId], references: [id], onDelete: SetNull)
+  user   User?   @relation(fields: [userId], references: [id], onDelete: SetNull)
 
   @@map("audit_logs")
 }
 
 model Subscription {
   id               String   @id @default(uuid())
+  tenantId         String   @map("tenant_id")
   userId           String   @map("user_id")
   planName         String   @map("plan_name")
   status           String   @default("active")
   currentPeriodEnd DateTime @map("current_period_end")
 
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@map("subscriptions")
 }

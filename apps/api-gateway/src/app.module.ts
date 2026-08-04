@@ -1,9 +1,14 @@
-import { Module, Get, Controller } from '@nestjs/common';
+import { Module, Get, Controller, Res } from '@nestjs/common';
+import { Response } from 'express';
 import { ApiTags, ApiOperation } from '@nestjs/swagger';
+import { MetricsService } from './metrics.service';
+import { DashboardController } from './dashboard.controller';
 
-@ApiTags('Gateway Health')
+@ApiTags('Gateway Observability')
 @Controller()
 export class GatewayController {
+  constructor(private readonly metricsService: MetricsService) {}
+
   @Get('health')
   @ApiOperation({ summary: 'API Gateway Health Status' })
   getHealth() {
@@ -15,13 +20,17 @@ export class GatewayController {
   }
 
   @Get('metrics')
-  @ApiOperation({ summary: 'Prometheus Metrics Placeholder' })
-  getMetrics() {
-    return '# HELP gateway_requests_total Total HTTP requests\n# TYPE gateway_requests_total counter\ngateway_requests_total 42\n';
+  @ApiOperation({ summary: 'Prometheus Metrics Endpoint' })
+  async getMetrics(@Res() res: Response) {
+    const metrics = await this.metricsService.getMetrics();
+    res.setHeader('Content-Type', 'text/plain; version=0.0.4');
+    return res.send(metrics);
   }
 }
 
 @Module({
-  controllers: [GatewayController],
+  controllers: [GatewayController, DashboardController],
+  providers: [MetricsService],
+  exports: [MetricsService],
 })
 export class AppModule {}

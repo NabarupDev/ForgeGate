@@ -16,27 +16,55 @@ let StructuredLogger = class StructuredLogger {
     constructor(serviceName = 'ForgeGate') {
         this.logger = winston.createLogger({
             level: process.env.LOG_LEVEL || 'info',
-            format: winston.format.combine(winston.format.timestamp(), winston.format.json()),
+            format: winston.format.combine(winston.format.timestamp(), winston.format.errors({ stack: true }), winston.format.json()),
             defaultMeta: { service: serviceName },
             transports: [
                 new winston.transports.Console(),
             ],
         });
     }
-    log(message, context) {
-        this.logger.info(message, { context });
+    log(message, contextOrMeta) {
+        if (typeof contextOrMeta === 'object') {
+            this.logger.info(message, contextOrMeta);
+        }
+        else {
+            this.logger.info(message, { context: contextOrMeta });
+        }
     }
-    error(message, trace, context) {
-        this.logger.error(message, { trace, context });
+    error(message, trace, contextOrMeta) {
+        if (typeof contextOrMeta === 'object') {
+            this.logger.error(message, { trace, ...contextOrMeta });
+        }
+        else {
+            this.logger.error(message, { trace, context: contextOrMeta });
+        }
     }
-    warn(message, context) {
-        this.logger.warn(message, { context });
+    warn(message, contextOrMeta) {
+        if (typeof contextOrMeta === 'object') {
+            this.logger.warn(message, contextOrMeta);
+        }
+        else {
+            this.logger.warn(message, { context: contextOrMeta });
+        }
     }
-    debug(message, context) {
-        this.logger.debug(message, { context });
+    debug(message, contextOrMeta) {
+        if (typeof contextOrMeta === 'object') {
+            this.logger.debug(message, contextOrMeta);
+        }
+        else {
+            this.logger.debug(message, { context: contextOrMeta });
+        }
     }
-    verbose(message, context) {
-        this.logger.verbose(message, { context });
+    verbose(message, contextOrMeta) {
+        if (typeof contextOrMeta === 'object') {
+            this.logger.verbose(message, contextOrMeta);
+        }
+        else {
+            this.logger.verbose(message, { context: contextOrMeta });
+        }
+    }
+    logEvent(event, meta) {
+        this.logger.info(event, meta);
     }
 };
 exports.StructuredLogger = StructuredLogger;
