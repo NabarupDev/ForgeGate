@@ -1,23 +1,17 @@
-import { Module, Get, Controller, Res } from '@nestjs/common';
+import { Module, Get, Controller, Res, UseGuards } from '@nestjs/common';
 import { Response } from 'express';
 import { ApiTags, ApiOperation } from '@nestjs/swagger';
 import { MetricsService } from './metrics.service';
 import { DashboardController } from './dashboard.controller';
+import { HealthController } from './health/health.controller';
+import { ProxyService } from './proxy/proxy.service';
+import { ProxyController } from './proxy/proxy.controller';
+import { RedisRateLimiterGuard } from './rate-limiter/rate-limiter.guard';
 
 @ApiTags('Gateway Observability')
 @Controller()
-export class GatewayController {
+export class GatewayMetricsController {
   constructor(private readonly metricsService: MetricsService) {}
-
-  @Get('health')
-  @ApiOperation({ summary: 'API Gateway Health Status' })
-  getHealth() {
-    return {
-      status: 'ok',
-      service: 'api-gateway',
-      timestamp: new Date().toISOString(),
-    };
-  }
 
   @Get('metrics')
   @ApiOperation({ summary: 'Prometheus Metrics Endpoint' })
@@ -29,8 +23,20 @@ export class GatewayController {
 }
 
 @Module({
-  controllers: [GatewayController, DashboardController],
-  providers: [MetricsService],
-  exports: [MetricsService],
+  controllers: [
+    HealthController,
+    DashboardController,
+    GatewayMetricsController,
+    ProxyController,
+  ],
+  providers: [
+    MetricsService,
+    ProxyService,
+    {
+      provide: 'APP_GUARD',
+      useClass: RedisRateLimiterGuard,
+    },
+  ],
+  exports: [MetricsService, ProxyService],
 })
 export class AppModule {}
