@@ -1,7 +1,7 @@
 import { Injectable, OnModuleInit, OnModuleDestroy } from '@nestjs/common';
 import { Queue, Worker, QueueEvents, Job } from 'bullmq';
 import Redis from 'ioredis';
-import { WorkflowEngineService } from './workflow-engine.service';
+import { WorkflowEngineService } from '../workflow-engine/workflow-engine.service';
 import { StructuredLogger } from '@forgegate/logger';
 
 @Injectable()

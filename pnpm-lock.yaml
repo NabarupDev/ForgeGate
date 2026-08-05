@@ -252,6 +252,12 @@ importers:
       bullmq:
         specifier: ^5.41.6
         version: 5.81.3(supports-color@8.1.1)
+      class-transformer:
+        specifier: ^0.5.1
+        version: 0.5.1
+      class-validator:
+        specifier: ^0.14.4
+        version: 0.14.4
       dotenv:
         specifier: ^16.4.7
         version: 16.6.1

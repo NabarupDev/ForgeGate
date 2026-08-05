@@ -1,5 +1,5 @@
-import { Injectable, Logger } from '@nestjs/common';
-import { PrismaService } from './prisma.service';
+import { Injectable } from '@nestjs/common';
+import { PrismaService } from '../prisma.service';
 import { StructuredLogger } from '@forgegate/logger';
 import axios from 'axios';
 
