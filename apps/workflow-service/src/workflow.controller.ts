@@ -1,13 +1,9 @@
-import { Controller, Post, Get, Body, Param, Query, NotFoundException, BadRequestException } from '@nestjs/common';
-import { PrismaService } from './prisma.service';
-import { QueueService } from './queue.service';
+import { Controller, Post, Get, Body, Param, Query } from '@nestjs/common';
+import { WorkflowService, CreateWorkflowDto } from './workflow.service';
 
 @Controller('workflows')
 export class WorkflowController {
-  constructor(
-    private readonly prisma: PrismaService,
-    private readonly queueService: QueueService,
-  ) {}
+  constructor(private readonly workflowService: WorkflowService) {}
 
   @Get('health')
   health() {
@@ -16,100 +12,41 @@ export class WorkflowController {
 
   @Get('metrics/queue')
   async getQueueMetrics() {
-    return this.queueService.getMetrics();
+    return this.workflowService.getQueueMetrics();
   }
 
   @Get('dlq/jobs')
   async getDlqJobs() {
-    return this.queueService.getDlqJobs();
+    return this.workflowService.getDlqJobs();
   }
 
   @Post('dlq/:jobId/retry')
   async retryDlqJob(@Param('jobId') jobId: string) {
-    return this.queueService.replayDlqJob(jobId);
+    return this.workflowService.replayDlqJob(jobId);
   }
 
   @Get('executions/:id')
   async getExecution(@Param('id') id: string) {
-    const execution = await this.prisma.workflowExecution.findUnique({
-      where: { id },
-      include: { workflow: true, logs: { orderBy: { createdAt: 'asc' } } },
-    });
-    if (!execution) throw new NotFoundException('Execution not found');
-    return execution;
+    return this.workflowService.getExecution(id);
   }
 
   @Post()
-  async createWorkflow(@Body() body: any) {
-    const { name, description, triggerType, createdById, tenantId, steps } = body;
-    if (!name || !tenantId || !createdById) {
-      throw new BadRequestException('name, tenantId, and createdById are required');
-    }
-
-    const workflow = await this.prisma.workflow.create({
-      data: {
-        name,
-        description,
-        triggerType: triggerType || 'webhook',
-        createdById,
-        tenantId,
-        steps: {
-          create: (steps || []).map((s: any, idx: number) => ({
-            stepOrder: s.stepOrder || idx + 1,
-            actionType: s.actionType || 'http_request',
-            config: s.config || {},
-            retryLimit: s.retryLimit || 3,
-          })),
-        },
-      },
-      include: { steps: true },
-    });
-
-    return workflow;
+  async createWorkflow(@Body() dto: CreateWorkflowDto) {
+    return this.workflowService.createWorkflow(dto);
   }
 
   @Get()
   async getWorkflows(@Query('tenantId') tenantId: string) {
-    const where = tenantId ? { tenantId } : {};
-    return this.prisma.workflow.findMany({
-      where,
-      include: { steps: true, _count: { select: { executions: true } } },
-      orderBy: { createdAt: 'desc' },
-    });
+    return this.workflowService.getWorkflows(tenantId);
   }
 
   @Get(':id')
   async getWorkflow(@Param('id') id: string) {
-    const wf = await this.prisma.workflow.findUnique({
-      where: { id },
-      include: { steps: true, executions: { take: 10, orderBy: { startedAt: 'desc' } } },
-    });
-    if (!wf) throw new NotFoundException('Workflow not found');
-    return wf;
+    return this.workflowService.getWorkflowById(id);
   }
 
   @Post(':id/trigger')
   async triggerWorkflow(@Param('id') id: string, @Body() body: { tenantId?: string; metadata?: any }) {
-    const wf = await this.prisma.workflow.findUnique({ where: { id } });
-    if (!wf) throw new NotFoundException('Workflow not found');
-
-    const tenantId = body.tenantId || wf.tenantId;
-
-    const execution = await this.prisma.workflowExecution.create({
-      data: {
-        workflowId: wf.id,
-        tenantId,
-        status: 'pending',
-        metadata: body.metadata || {},
-      },
-    });
-
-    const queueResult = await this.queueService.addExecutionJob(execution.id, tenantId);
-
-    return {
-      executionId: execution.id,
-      status: execution.status,
-      queue: queueResult,
-    };
+    return this.workflowService.triggerWorkflow(id, body);
   }
 }
