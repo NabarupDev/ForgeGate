@@ -1,13 +1,19 @@
 // Prisma Schema for ForgeGate Distributed Backend Workflow Platform
 
 generator client {
-  provider = "prisma-client-js"
+  provider        = "prisma-client-js"
+  previewFeatures = ["multiSchema"]
 }
 
 datasource db {
   provider = "postgresql"
   url      = env("DATABASE_URL")
+  schemas  = ["auth", "workflow", "audit", "billing"]
 }
+
+// ----------------------------------------------------
+// AUTH DOMAIN (schema: "auth") - Owned by Auth Service
+// ----------------------------------------------------
 
 model Tenant {
   id        String   @id @default(uuid())
@@ -17,12 +23,10 @@ model Tenant {
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
-  users         User[]
-  workflows     Workflow[]
-  subscriptions Subscription[]
-  auditLogs     AuditLog[]
+  users User[]
 
   @@map("tenants")
+  @@schema("auth")
 }
 
 model User {
@@ -36,15 +40,13 @@ model User {
   createdAt    DateTime @default(now()) @map("created_at")
   updatedAt    DateTime @updatedAt @map("updated_at")
 
-  tenant             Tenant              @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  role               Role                @relation(fields: [roleId], references: [id])
-  oauthAccounts      OAuthAccount[]
-  refreshTokens      RefreshToken[]
-  auditLogs          AuditLog[]
-  subscriptions      Subscription[]
-  createdWorkflows   Workflow[]          @relation("UserWorkflows")
+  tenant        Tenant         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  role          Role           @relation(fields: [roleId], references: [id])
+  oauthAccounts OAuthAccount[]
+  refreshTokens RefreshToken[]
 
   @@map("users")
+  @@schema("auth")
 }
 
 model Role {
@@ -57,6 +59,7 @@ model Role {
   permissions RolePermission[]
 
   @@map("roles")
+  @@schema("auth")
 }
 
 model Permission {
@@ -67,6 +70,7 @@ model Permission {
   roles RolePermission[]
 
   @@map("permissions")
+  @@schema("auth")
 }
 
 model RolePermission {
@@ -78,6 +82,7 @@ model RolePermission {
 
   @@id([roleId, permissionId])
   @@map("role_permissions")
+  @@schema("auth")
 }
 
 model OAuthAccount {
@@ -91,6 +96,7 @@ model OAuthAccount {
 
   @@unique([provider, providerUserId])
   @@map("oauth_accounts")
+  @@schema("auth")
 }
 
 model RefreshToken {
@@ -103,7 +109,12 @@ model RefreshToken {
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@map("refresh_tokens")
+  @@schema("auth")
 }
+
+// ----------------------------------------------------------------
+// WORKFLOW ENGINE DOMAIN (schema: "workflow") - Owned by Workflow Service
+// ----------------------------------------------------------------
 
 model Workflow {
   id          String   @id @default(uuid())
@@ -116,12 +127,11 @@ model Workflow {
   createdAt   DateTime @default(now()) @map("created_at")
   updatedAt   DateTime @updatedAt @map("updated_at")
 
-  tenant     Tenant              @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  createdBy  User                @relation("UserWorkflows", fields: [createdById], references: [id])
   steps      WorkflowStep[]
   executions WorkflowExecution[]
 
   @@map("workflows")
+  @@schema("workflow")
 }
 
 model WorkflowStep {
@@ -136,6 +146,7 @@ model WorkflowStep {
   stepExecutions StepExecution[]
 
   @@map("workflow_steps")
+  @@schema("workflow")
 }
 
 model WorkflowExecution {
@@ -153,6 +164,7 @@ model WorkflowExecution {
   stepExecutions StepExecution[]
 
   @@map("workflow_executions")
+  @@schema("workflow")
 }
 
 model ExecutionLog {
@@ -167,36 +179,7 @@ model ExecutionLog {
   execution WorkflowExecution @relation(fields: [executionId], references: [id], onDelete: Cascade)
 
   @@map("execution_logs")
-}
-
-model AuditLog {
-  id        String   @id @default(uuid())
-  tenantId  String?  @map("tenant_id")
-  userId    String?  @map("user_id")
-  action    String
-  ipAddress String?  @map("ip_address")
-  userAgent String?  @map("user_agent")
-  metadata  Json?
-  createdAt DateTime @default(now()) @map("created_at")
-
-  tenant Tenant? @relation(fields: [tenantId], references: [id], onDelete: SetNull)
-  user   User?   @relation(fields: [userId], references: [id], onDelete: SetNull)
-
-  @@map("audit_logs")
-}
-
-model Subscription {
-  id               String   @id @default(uuid())
-  tenantId         String   @map("tenant_id")
-  userId           String   @map("user_id")
-  planName         String   @map("plan_name")
-  status           String   @default("active")
-  currentPeriodEnd DateTime @map("current_period_end")
-
-  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
-
-  @@map("subscriptions")
+  @@schema("workflow")
 }
 
 enum StepExecutionStatus {
@@ -206,6 +189,8 @@ enum StepExecutionStatus {
   FAILED
   TIMED_OUT
   CANCELLED
+
+  @@schema("workflow")
 }
 
 model StepExecution {
@@ -231,5 +216,39 @@ model StepExecution {
   @@index([status])
   @@index([executionId, stepId, attempt])
   @@map("step_executions")
+  @@schema("workflow")
 }
 
+// ----------------------------------------------------
+// AUDIT DOMAIN (schema: "audit") - Owned by Audit Service
+// ----------------------------------------------------
+
+model AuditLog {
+  id        String   @id @default(uuid())
+  tenantId  String?  @map("tenant_id")
+  userId    String?  @map("user_id")
+  action    String
+  ipAddress String?  @map("ip_address")
+  userAgent String?  @map("user_agent")
+  metadata  Json?
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@map("audit_logs")
+  @@schema("audit")
+}
+
+// --------------------------------------------------------
+// BILLING DOMAIN (schema: "billing") - Owned by Billing Service
+// --------------------------------------------------------
+
+model Subscription {
+  id               String   @id @default(uuid())
+  tenantId         String   @map("tenant_id")
+  userId           String   @map("user_id")
+  planName         String   @map("plan_name")
+  status           String   @default("active")
+  currentPeriodEnd DateTime @map("current_period_end")
+
+  @@map("subscriptions")
+  @@schema("billing")
+}
