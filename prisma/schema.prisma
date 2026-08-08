@@ -132,7 +132,8 @@ model WorkflowStep {
   config     Json
   retryLimit Int    @default(3) @map("retry_limit")
 
-  workflow Workflow @relation(fields: [workflowId], references: [id], onDelete: Cascade)
+  workflow       Workflow        @relation(fields: [workflowId], references: [id], onDelete: Cascade)
+  stepExecutions StepExecution[]
 
   @@map("workflow_steps")
 }
@@ -147,8 +148,9 @@ model WorkflowExecution {
   startedAt   DateTime  @default(now()) @map("started_at")
   completedAt DateTime? @map("completed_at")
 
-  workflow Workflow       @relation(fields: [workflowId], references: [id], onDelete: Cascade)
-  logs     ExecutionLog[]
+  workflow       Workflow        @relation(fields: [workflowId], references: [id], onDelete: Cascade)
+  logs           ExecutionLog[]
+  stepExecutions StepExecution[]
 
   @@map("workflow_executions")
 }
@@ -196,3 +198,38 @@ model Subscription {
 
   @@map("subscriptions")
 }
+
+enum StepExecutionStatus {
+  PENDING
+  RUNNING
+  SUCCEEDED
+  FAILED
+  TIMED_OUT
+  CANCELLED
+}
+
+model StepExecution {
+  id          String              @id @default(uuid())
+  executionId String              @map("execution_id")
+  stepId      String              @map("step_id")
+  attempt     Int                 @default(1)
+  status      StepExecutionStatus @default(PENDING)
+  startedAt   DateTime?           @map("started_at")
+  finishedAt  DateTime?           @map("finished_at")
+  input       Json?
+  output      Json?
+  error       String?
+  workerId    String?             @map("worker_id")
+  heartbeatAt DateTime?           @map("heartbeat_at")
+  createdAt   DateTime            @default(now()) @map("created_at")
+  updatedAt   DateTime            @updatedAt @map("updated_at")
+
+  execution WorkflowExecution @relation(fields: [executionId], references: [id], onDelete: Cascade)
+  step      WorkflowStep      @relation(fields: [stepId], references: [id], onDelete: Cascade)
+
+  @@index([executionId])
+  @@index([status])
+  @@index([executionId, stepId, attempt])
+  @@map("step_executions")
+}
+

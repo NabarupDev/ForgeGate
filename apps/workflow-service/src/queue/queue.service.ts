@@ -114,6 +114,31 @@ export class QueueService implements OnModuleInit, OnModuleDestroy {
     return { jobId: job.id, status: 'enqueued' };
   }
 
+  async recoverStaleExecutions(leaseDurationMs: number = 30000) {
+    const staleExecutions = await this.engineService.findAndMarkStaleStepExecutions(leaseDurationMs);
+    const reenqueuedIds: string[] = [];
+
+    for (const { executionId, tenantId } of staleExecutions) {
+      const existingJobs = await this.workflowQueue.getJobs(['active', 'waiting', 'delayed']);
+      const isAlreadyQueued = existingJobs.some((j) => j && j.data && j.data.executionId === executionId);
+
+      if (!isAlreadyQueued) {
+        await this.addExecutionJob(executionId, tenantId);
+        reenqueuedIds.push(executionId);
+      } else {
+        this.structuredLogger.logEvent('stale_recovery_skipped_already_queued', {
+          executionId,
+        });
+      }
+    }
+
+    return {
+      staleCount: staleExecutions.length,
+      reenqueuedCount: reenqueuedIds.length,
+      reenqueuedIds,
+    };
+  }
+
   async getMetrics() {
     const dlqJobs = await this.dlqQueue.getJobs(['waiting', 'active', 'completed', 'failed']);
     const [wWaiting, wActive, wCompleted, wFailed] = await Promise.all([
