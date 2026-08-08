@@ -5,6 +5,7 @@ import axios from 'axios';
 import { classifyHttpError, HttpStepError } from './http-step-classifier';
 import { resolveHttpTimeout } from './http-timeout-resolver';
 import { generateStepIdempotencyKey } from './idempotency';
+import { OutboundRateLimiter } from './outbound-rate-limiter';
 
 function sanitizePayload(data: any): any {
   if (data === null || data === undefined) return data;
@@ -42,7 +43,10 @@ function sanitizePayload(data: any): any {
 export class WorkflowEngineService {
   private structuredLogger = new StructuredLogger('workflow-engine');
 
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly outboundRateLimiter?: OutboundRateLimiter,
+  ) {}
 
   async executeExecution(executionId: string, tenantId: string, attemptCount: number = 1): Promise<any> {
     const startTime = Date.now();
@@ -364,6 +368,27 @@ export class WorkflowEngineService {
             url,
             method,
           });
+        }
+
+        if (this.outboundRateLimiter) {
+          const checkResult = await this.outboundRateLimiter.checkAndConsume({
+            tenantId: context?.tenantId || 'default',
+            workflowId: context?.executionId,
+            stepId: context?.stepId,
+            stepConfig: config,
+          });
+
+          if (!checkResult.allowed) {
+            throw new HttpStepError({
+              category: 'RATE_LIMITED',
+              isRetryable: true,
+              retryAfterSeconds: checkResult.retryAfterSeconds || 60,
+              message: `Outbound rate limit exceeded for scope '${checkResult.exceededScope}'. Retry after ${checkResult.retryAfterSeconds} seconds.`,
+              subReason: 'outbound_rate_limit_exceeded',
+              url,
+              method,
+            });
+          }
         }
 
         try {
