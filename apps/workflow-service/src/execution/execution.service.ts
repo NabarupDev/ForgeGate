@@ -61,7 +61,7 @@ export class ExecutionService {
 
     // 3. Tenant Isolation & Policy Authorization Check when user context is present
     if (user && (execution.tenantId !== user.tenantId || !AuthorizationPolicy.can(user, 'execution:read', execution))) {
-      throw new ForbiddenException('Access denied to execution resource');
+      throw new NotFoundException('Execution not found');
     }
 
     return execution;

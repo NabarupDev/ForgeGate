@@ -202,7 +202,7 @@ describe('Fine-Grained Authorization & Tenant Isolation', () => {
 
     it('should prevent Tenant A user from fetching Tenant B execution logs', async () => {
       await expect(executionService.getExecution('exec-b', tenantA_Admin)).rejects.toThrow(
-        ForbiddenException,
+        NotFoundException,
       );
     });
   });

@@ -51,7 +51,10 @@ export class ProxyService {
     } catch (error: any) {
       const durationMs = Date.now() - startTime;
       const statusCode = error.response?.status || HttpStatus.BAD_GATEWAY;
-      const message = error.response?.data || { error: 'Upstream service unavailable', details: error.message };
+      const message = error.response?.data || {
+        message: 'Upstream service unavailable. Please try again later.',
+        code: 'SERVICE_UNAVAILABLE',
+      };
 
       this.logger.error(`Proxy failure to ${service} microservice at ${targetUrl}: ${error.message}`, error.stack, {
         service,

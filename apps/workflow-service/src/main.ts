@@ -5,11 +5,15 @@ dotenv.config();
 
 import { NestFactory } from '@nestjs/core';
 import { StructuredLogger } from '@forgegate/logger';
+import { AllExceptionsFilter } from '@forgegate/common';
 import { AppModule } from './app.module';
 
 async function bootstrap() {
   const logger = new StructuredLogger('Workflow-Service');
   const app = await NestFactory.create(AppModule, { logger });
+
+  (app.getHttpAdapter().getInstance() as any)?.disable?.('x-powered-by');
+  app.useGlobalFilters(new AllExceptionsFilter());
 
   const port = process.env.WORKFLOW_SERVICE_PORT || 3002;
   await app.listen(port);

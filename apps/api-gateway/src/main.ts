@@ -18,6 +18,7 @@ async function bootstrap() {
   app.setGlobalPrefix(apiPrefix);
   app.enableCors();
   app.enableShutdownHooks();
+  (app.getHttpAdapter().getInstance() as any)?.disable?.('x-powered-by');
 
   app.useGlobalInterceptors(new TransformInterceptor());
   app.useGlobalFilters(new AllExceptionsFilter());
