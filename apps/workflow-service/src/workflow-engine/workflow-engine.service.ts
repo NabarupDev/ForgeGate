@@ -3,6 +3,7 @@ import { PrismaService } from '../prisma.service';
 import { StructuredLogger } from '@forgegate/logger';
 import axios from 'axios';
 import { classifyHttpError, HttpStepError } from './http-step-classifier';
+import { resolveHttpTimeout } from './http-timeout-resolver';
 
 function sanitizePayload(data: any): any {
   if (data === null || data === undefined) return data;
@@ -183,8 +184,6 @@ export class WorkflowEngineService {
             stepErr.category === 'TIMEOUT' ||
             stepErr.subReason === 'request_timeout' ||
             stepErr.subReason === 'socket_timeout' ||
-            stepErr.message?.toLowerCase().includes('timeout') ||
-            stepErr.message?.toLowerCase().includes('timed out') ||
             stepErr.code === 'ECONNABORTED' ||
             stepErr.code === 'ETIMEDOUT';
 
@@ -329,13 +328,27 @@ export class WorkflowEngineService {
         const headers = config.headers || {};
         const body = config.body || input;
 
+        let timeoutMs: number;
+        try {
+          timeoutMs = resolveHttpTimeout(config.timeoutMs);
+        } catch (err: any) {
+          throw new HttpStepError({
+            category: 'PERMANENT_FAILURE',
+            isRetryable: false,
+            message: err.message,
+            subReason: 'invalid_timeout_configuration',
+            url,
+            method,
+          });
+        }
+
         try {
           const response = await axios({
             url,
             method,
             headers,
             data: method !== 'GET' ? body : undefined,
-            timeout: 5000,
+            timeout: timeoutMs,
           });
           return { statusCode: response.status, data: response.data };
         } catch (err: any) {
