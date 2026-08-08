@@ -6,6 +6,7 @@ import { classifyHttpError, HttpStepError } from './http-step-classifier';
 import { resolveHttpTimeout } from './http-timeout-resolver';
 import { generateStepIdempotencyKey } from './idempotency';
 import { OutboundRateLimiter } from './outbound-rate-limiter';
+import { OutboundConcurrencyLimiter, ConcurrencyLease } from './outbound-concurrency-limiter';
 
 function sanitizePayload(data: any): any {
   if (data === null || data === undefined) return data;
@@ -46,6 +47,7 @@ export class WorkflowEngineService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly outboundRateLimiter?: OutboundRateLimiter,
+    private readonly outboundConcurrencyLimiter?: OutboundConcurrencyLimiter,
   ) {}
 
   async executeExecution(executionId: string, tenantId: string, attemptCount: number = 1): Promise<any> {
@@ -391,6 +393,29 @@ export class WorkflowEngineService {
           }
         }
 
+        let concurrencyLease: ConcurrencyLease | undefined;
+        if (this.outboundConcurrencyLimiter) {
+          const concResult = await this.outboundConcurrencyLimiter.acquire({
+            tenantId: context?.tenantId || 'default',
+            workflowId: context?.executionId,
+            stepId: context?.stepId,
+            stepConfig: config,
+          });
+
+          if (!concResult.acquired) {
+            throw new HttpStepError({
+              category: 'RATE_LIMITED',
+              isRetryable: true,
+              retryAfterSeconds: concResult.retryAfterSeconds || 2,
+              message: `Outbound concurrency limit exceeded for scope '${concResult.exceededScope}'.`,
+              subReason: 'outbound_concurrency_limit_exceeded',
+              url,
+              method,
+            });
+          }
+          concurrencyLease = concResult.lease;
+        }
+
         try {
           const response = await axios({
             url,
@@ -402,6 +427,10 @@ export class WorkflowEngineService {
           return { statusCode: response.status, data: response.data };
         } catch (err: any) {
           throw classifyHttpError(err, url, method);
+        } finally {
+          if (this.outboundConcurrencyLimiter && concurrencyLease) {
+            await this.outboundConcurrencyLimiter.release(concurrencyLease);
+          }
         }
       }
 
