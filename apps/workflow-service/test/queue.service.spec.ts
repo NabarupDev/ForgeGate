@@ -78,7 +78,12 @@ describe('QueueService (Current Behavior Regression Tests)', () => {
         expect.objectContaining({ executionId: 'exec-dlq-replay', tenantId: 'tenant-dlq' }),
         expect.any(Object),
       );
-      expect(res).toEqual({ jobId: 'new-job-200', status: 'enqueued' });
+      expect(res).toEqual(
+        expect.objectContaining({
+          jobId: 'new-job-200',
+          status: 'replayed',
+        }),
+      );
     });
   });
 

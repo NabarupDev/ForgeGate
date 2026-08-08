@@ -329,6 +329,50 @@ export class WorkflowEngineService {
     return Array.from(recoveredMap.values());
   }
 
+  async logReplayEvent(
+    executionId: string,
+    tenantId: string,
+    operatorId: string = 'operator',
+    dlqJobId?: string,
+  ) {
+    const execution = await this.prisma.workflowExecution.findFirst({
+      where: { id: executionId, tenantId },
+    });
+
+    if (execution) {
+      const currentMetadata = (execution.metadata as Record<string, any>) || {};
+      const replayCount = (currentMetadata.replayCount || 0) + 1;
+
+      await this.prisma.workflowExecution.update({
+        where: { id: executionId },
+        data: {
+          status: 'running',
+          metadata: {
+            ...currentMetadata,
+            replayCount,
+            lastReplayedAt: new Date().toISOString(),
+            lastReplayedBy: operatorId,
+            replayedFromDlqJobId: dlqJobId,
+          },
+        },
+      });
+
+      await this.prisma.executionLog.create({
+        data: {
+          executionId,
+          stepId: 'DLQ_REPLAY',
+          status: 'replay_triggered',
+          output: {
+            operatorId,
+            dlqJobId,
+            replayCount,
+            timestamp: new Date().toISOString(),
+          },
+        },
+      });
+    }
+  }
+
   private async executeStep(
     step: any,
     input: any,

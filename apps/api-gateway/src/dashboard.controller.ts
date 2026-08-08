@@ -115,16 +115,17 @@ export class DashboardController {
       <table>
         <thead>
           <tr>
-            <th>Job ID</th>
-            <th>Execution ID</th>
-            <th>Tenant</th>
-            <th>Error Reason</th>
+            <th>Job / Execution ID</th>
+            <th>Tenant / Step</th>
+            <th>Failure Reason & Category</th>
+            <th>Attempts & Rate Limit</th>
+            <th>Replay Status</th>
             <th>Action</th>
           </tr>
         </thead>
         <tbody id="dlqTableBody">
           <tr>
-            <td colspan="5" style="text-align: center; color: var(--text-muted);">No jobs currently in Dead Letter Queue</td>
+            <td colspan="6" style="text-align: center; color: var(--text-muted);">No jobs currently in Dead Letter Queue</td>
           </tr>
         </tbody>
       </table>
@@ -223,7 +224,7 @@ export class DashboardController {
           const badge = document.getElementById('dlqBadge');
 
           if (!jobs || jobs.length === 0) {
-            tbody.innerHTML = '<tr><td colspan="5" style="text-align: center; color: var(--text-muted);">No jobs currently in Dead Letter Queue</td></tr>';
+            tbody.innerHTML = '<tr><td colspan="6" style="text-align: center; color: var(--text-muted);">No jobs currently in Dead Letter Queue</td></tr>';
             badge.style.background = 'rgba(16,185,129,0.15)';
             badge.style.color = '#34d399';
             badge.style.borderColor = 'rgba(16,185,129,0.3)';
@@ -234,15 +235,40 @@ export class DashboardController {
             badge.style.borderColor = 'rgba(239,68,68,0.3)';
             badge.innerText = jobs.length + ' Jobs Require Attention';
 
-            tbody.innerHTML = jobs.map(j => 
-              '<tr>' +
-                '<td>' + j.id + '</td>' +
-                '<td>' + (j.data.executionId || 'N/A') + '</td>' +
-                '<td>' + (j.data.tenantId || 'N/A') + '</td>' +
-                '<td style="color: var(--danger);">' + (j.failedReason || j.data.errorReason || 'Execution exhausted retries') + '</td>' +
-                '<td><button class="btn" onclick="replayDlq(\'' + j.id + '\')">Replay Job</button></td>' +
-              '</tr>'
-            ).join('');
+            tbody.innerHTML = jobs.map(j => {
+              const execId = j.executionId || (j.data && j.data.executionId) || 'N/A';
+              const tenantId = j.tenantId || (j.data && j.data.tenantId) || 'N/A';
+              const stepId = j.failedStepId || (j.data && j.data.failedStepId) || 'unknown';
+              const category = j.failureCategory || (j.data && j.data.failureCategory) || 'PERMANENT';
+              const httpStatus = j.httpStatus || (j.data && j.data.httpStatus);
+              const statusStr = httpStatus ? ' (HTTP ' + httpStatus + ')' : '';
+              const errMsg = j.finalErrorMessage || j.failedReason || (j.data && j.data.finalErrorMessage) || 'Exhausted retries';
+              const retryCount = j.retryCount || (j.data && j.data.retryCount) || 1;
+              const isRateLimited = j.isRateLimited || (j.data && j.data.isRateLimited);
+              const rateDeferrals = j.rateLimitDeferralCount || (j.data && j.data.rateLimitDeferralCount) || 0;
+              const isReplayed = j.replayed || (j.data && j.data.replayed);
+
+              const statusBadge = isReplayed
+                ? '<span class="badge" style="background:rgba(59,130,246,0.15);color:#60a5fa;border-color:rgba(59,130,246,0.3);">Replayed</span>'
+                : '<span class="badge" style="background:rgba(239,68,68,0.15);color:#f87171;border-color:rgba(239,68,68,0.3);">Dead-Lettered</span>';
+              
+              const rateLimitText = isRateLimited
+                ? '<br/><span style="color:var(--warning);font-size:0.75rem;">Rate Limited (' + rateDeferrals + ' defers)</span>'
+                : '';
+
+              const actionBtn = isReplayed
+                ? '<button class="btn btn-secondary" disabled style="opacity:0.5;cursor:not-allowed;">Replayed</button>'
+                : '<button class="btn" onclick="replayDlq(\'' + j.id + '\')">Replay Job</button>';
+
+              return '<tr>' +
+                '<td><strong>' + j.id + '</strong><br/><span style="color:var(--text-muted);font-size:0.75rem;">' + execId + '</span></td>' +
+                '<td>' + tenantId + '<br/><span style="color:var(--accent-cyan);font-size:0.75rem;">Step: ' + stepId + '</span></td>' +
+                '<td><strong style="color:var(--danger);">' + category + '</strong>' + statusStr + '<br/><span style="color:var(--text-muted);font-size:0.75rem;">' + errMsg + '</span></td>' +
+                '<td>Attempts: ' + retryCount + rateLimitText + '</td>' +
+                '<td>' + statusBadge + '</td>' +
+                '<td>' + actionBtn + '</td>' +
+              '</tr>';
+            }).join('');
           }
         }
       } catch (e) {

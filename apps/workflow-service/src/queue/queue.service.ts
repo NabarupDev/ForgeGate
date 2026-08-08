@@ -4,6 +4,17 @@ import { StructuredLogger } from '@forgegate/logger';
 import { WorkflowEngineService } from '../workflow-engine/workflow-engine.service';
 import { calculateRetryDecision } from '../workflow-engine/http-retry-scheduler';
 
+export function sanitizePayloadString(str: string): string {
+  if (!str) return str;
+  return str
+    .replace(/(authorization:\s*)(bearer\s+[^\s,]+|[^\s,]+)/gi, '$1[REDACTED]')
+    .replace(/(bearer\s+)([a-zA-Z0-9._-]+)/gi, '[REDACTED]')
+    .replace(/(api[-_]?key\s*[:=]\s*)([^\s,]+)/gi, '$1[REDACTED]')
+    .replace(/(password\s*[:=]\s*)([^\s,]+)/gi, '$1[REDACTED]')
+    .replace(/(token\s*[:=]\s*)([^\s,]+)/gi, '$1[REDACTED]')
+    .replace(/(secret\s*[:=]\s*)([^\s,]+)/gi, '$1[REDACTED]');
+}
+
 @Injectable()
 export class QueueService implements OnModuleInit, OnModuleDestroy {
   private workflowQueue!: Queue;
@@ -87,21 +98,50 @@ export class QueueService implements OnModuleInit, OnModuleDestroy {
           },
         );
       } else {
-        this.structuredLogger.error(
-          `Job ${job.id} will not be retried (${decision.reason}). Moving to DLQ.`,
-          err.stack,
-          { executionId, tenantId },
-        );
+        let workflowId = 'unknown';
+        let failedStepId = (err as any).stepId || 'unknown';
+        const category = (err as any).category || 'PERMANENT_FAILURE';
+        const httpStatus = (err as any).statusCode || (err as any).status || null;
 
-        await this.dlqQueue.add('dead-letter-job', {
+        try {
+          const execution = await this.engineService.getExecutionById(executionId);
+          if (execution && execution.workflowId) {
+            workflowId = execution.workflowId;
+          }
+        } catch (e) {
+          // Fallback
+        }
+
+        const sanitizedMessage = sanitizePayloadString(err.message || 'Workflow step failed');
+
+        const dlqData = {
           originalJobId: job.id,
           executionId,
           tenantId,
-          failedAt: new Date().toISOString(),
-          errorReason: `${err.message} (${decision.reason})`,
-        });
+          workflowId,
+          failedStepId,
+          failureCategory: category,
+          httpStatus,
+          retryCount: normalAttempts,
+          rateLimitDeferralCount: rateLimitDeferrals,
+          finalErrorMessage: sanitizedMessage,
+          timestamp: new Date().toISOString(),
+          lastAttemptTimestamp: new Date().toISOString(),
+          correlationId: job.data.correlationId || `corr-${executionId}`,
+          replayed: false,
+          replayedAt: null,
+          errorReason: `${sanitizedMessage} (${decision.reason})`,
+        };
 
-        await this.engineService.markAsFailed(executionId, `${err.message} (${decision.reason})`);
+        this.structuredLogger.error(
+          `Job ${job.id} will not be retried (${decision.reason}). Moving to DLQ.`,
+          err.stack,
+          { executionId, tenantId, dlqData },
+        );
+
+        await this.dlqQueue.add('dead-letter-job', dlqData);
+
+        await this.engineService.markAsFailed(executionId, `${sanitizedMessage} (${decision.reason})`);
       }
     });
 
@@ -178,14 +218,59 @@ export class QueueService implements OnModuleInit, OnModuleDestroy {
     return { jobId: res.jobId, status: 'enqueued' };
   }
 
-  async replayDlqJob(jobId: string) {
+  async replayDlqJob(jobId: string, operatorId: string = 'operator') {
     const job = await this.dlqQueue.getJob(jobId);
     if (!job) {
       throw new Error(`DLQ Job ${jobId} not found`);
     }
-    await job.remove();
-    const res = await this.enqueueWorkflowExecution(job.data.executionId, job.data.tenantId);
-    return { jobId: res.jobId, status: 'enqueued' };
+
+    const { executionId, tenantId, replayed } = job.data;
+
+    // 1. Prevent duplicate replay if already replayed or currently active in queue
+    const activeJobs =
+      typeof this.workflowQueue.getJobs === 'function'
+        ? await this.workflowQueue.getJobs(['active', 'waiting', 'delayed'])
+        : [];
+    const isCurrentlyActive = activeJobs.some((j) => j.data?.executionId === executionId);
+    if (isCurrentlyActive) {
+      throw new Error(`Execution ${executionId} is currently running or queued for execution`);
+    }
+
+    if (replayed) {
+      throw new Error(`DLQ Job ${jobId} (Execution ${executionId}) has already been replayed`);
+    }
+
+    // 2. Mark DLQ record as replayed for audit and UI transparency
+    const updatedData = {
+      ...job.data,
+      replayed: true,
+      replayedAt: new Date().toISOString(),
+      replayedBy: operatorId,
+    };
+    if (typeof job.updateData === 'function') {
+      await job.updateData(updatedData);
+    } else {
+      job.data = updatedData;
+    }
+
+    if (typeof job.remove === 'function') {
+      await job.remove();
+    }
+
+    // 3. Preserve audit trail in WorkflowEngineService
+    if (typeof this.engineService.logReplayEvent === 'function') {
+      await this.engineService.logReplayEvent(executionId, tenantId, operatorId, job.id);
+    }
+
+    // 4. Enqueue execution with fresh attempt counter (preserving step execution history)
+    const res = await this.enqueueWorkflowExecution(executionId, tenantId);
+
+    return {
+      jobId: res.jobId,
+      executionId,
+      status: 'replayed',
+      replayedAt: new Date().toISOString(),
+    };
   }
 
   async getMetrics() {
@@ -206,15 +291,41 @@ export class QueueService implements OnModuleInit, OnModuleDestroy {
 
   async getDlqJobs() {
     const jobs = await this.dlqQueue.getJobs(['waiting', 'active', 'completed', 'failed']);
-    return jobs.map((job) => ({
-      jobId: job.id,
-      data: job.data,
-      failedReason: job.failedReason,
-      timestamp: job.timestamp,
-    }));
+    return jobs.map((job) => {
+      const d = job.data || {};
+      const isRateLimited = (d.rateLimitDeferralCount || 0) > 0 || d.failureCategory === 'RATE_LIMITED';
+      const replayed = Boolean(d.replayed);
+
+      return {
+        jobId: job.id,
+        id: job.id,
+        executionId: d.executionId,
+        tenantId: d.tenantId,
+        workflowId: d.workflowId || 'unknown',
+        failedStepId: d.failedStepId || 'unknown',
+        failureCategory: d.failureCategory || 'PERMANENT_FAILURE',
+        httpStatus: d.httpStatus ?? null,
+        retryCount: d.retryCount || 1,
+        rateLimitDeferralCount: d.rateLimitDeferralCount || 0,
+        isRateLimited,
+        finalErrorMessage: d.finalErrorMessage || d.errorReason || job.failedReason || 'Unknown error',
+        failedReason: job.failedReason || d.finalErrorMessage || d.errorReason,
+        timestamp: d.timestamp || new Date(job.timestamp).toISOString(),
+        lastAttemptTimestamp: d.lastAttemptTimestamp || new Date(job.timestamp).toISOString(),
+        correlationId: d.correlationId || d.executionId,
+        replayed,
+        replayedAt: d.replayedAt || null,
+        retryableAt: replayed ? 'N/A' : 'Immediate upon replay',
+      };
+    });
   }
 
   async replayDeadLetterExecution(executionId: string, tenantId: string) {
+    const dlqJobs = await this.dlqQueue.getJobs(['waiting', 'active', 'completed', 'failed']);
+    const matchingJob = dlqJobs.find((j) => j.data.executionId === executionId && !j.data.replayed);
+    if (matchingJob) {
+      return this.replayDlqJob(matchingJob.id);
+    }
     return this.enqueueWorkflowExecution(executionId, tenantId);
   }
 
