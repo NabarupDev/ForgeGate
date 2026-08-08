@@ -155,13 +155,17 @@ describe('WorkflowEngineService (Current Behavior & StepExecution Lifecycle Test
         'HTTP GET to https://invalid.endpoint/api failed: Network error',
       );
 
-      // Transition to FAILED
+      // Transition to FAILED with structured HttpStepError details in output
       expect(prismaMock.stepExecution.update).toHaveBeenCalledWith({
         where: { id: 'step-exec-uuid-1' },
         data: {
           status: 'FAILED',
           finishedAt: expect.any(Date),
           error: 'HTTP GET to https://invalid.endpoint/api failed: Network error',
+          output: expect.objectContaining({
+            category: 'TRANSIENT_FAILURE',
+            isRetryable: true,
+          }),
         },
       });
     });
@@ -196,13 +200,17 @@ describe('WorkflowEngineService (Current Behavior & StepExecution Lifecycle Test
 
       await expect(service.executeExecution('exec-timeout-step', 'tenant-1', 1)).rejects.toThrow();
 
-      // Transition to TIMED_OUT
+      // Transition to TIMED_OUT with structured HttpStepError details in output
       expect(prismaMock.stepExecution.update).toHaveBeenCalledWith({
         where: { id: 'step-exec-uuid-1' },
         data: {
           status: 'TIMED_OUT',
           finishedAt: expect.any(Date),
           error: 'HTTP GET to https://slow.endpoint/api failed: timeout of 5000ms exceeded',
+          output: expect.objectContaining({
+            category: 'TIMEOUT',
+            isRetryable: true,
+          }),
         },
       });
     });

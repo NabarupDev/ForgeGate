@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../prisma.service';
 import { StructuredLogger } from '@forgegate/logger';
 import axios from 'axios';
+import { classifyHttpError, HttpStepError } from './http-step-classifier';
 
 function sanitizePayload(data: any): any {
   if (data === null || data === undefined) return data;
@@ -86,7 +87,7 @@ export class WorkflowEngineService {
           continue; // Skip steps prior to current sequence
         }
 
-        // F: Check if step has ALREADY SUCCEEDED in durable storage (idempotency check)
+        // Check if step has ALREADY SUCCEEDED in durable storage (idempotency check)
         const existingSucceededExec = await this.prisma.stepExecution.findFirst({
           where: {
             executionId: execution.id,
@@ -177,7 +178,11 @@ export class WorkflowEngineService {
             },
           });
         } catch (stepErr: any) {
+          const isHttpErr = stepErr instanceof HttpStepError;
           const isTimeout =
+            stepErr.category === 'TIMEOUT' ||
+            stepErr.subReason === 'request_timeout' ||
+            stepErr.subReason === 'socket_timeout' ||
             stepErr.message?.toLowerCase().includes('timeout') ||
             stepErr.message?.toLowerCase().includes('timed out') ||
             stepErr.code === 'ECONNABORTED' ||
@@ -192,6 +197,7 @@ export class WorkflowEngineService {
               status: endStatus,
               finishedAt: new Date(),
               error: stepErr.message || 'Unknown step execution error',
+              output: isHttpErr ? (stepErr.toJSON() as any) : undefined,
             },
           });
 
@@ -333,7 +339,7 @@ export class WorkflowEngineService {
           });
           return { statusCode: response.status, data: response.data };
         } catch (err: any) {
-          throw new Error(`HTTP ${method} to ${url} failed: ${err.message}`);
+          throw classifyHttpError(err, url, method);
         }
       }
 
