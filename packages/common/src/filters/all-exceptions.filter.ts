@@ -24,12 +24,15 @@ export class AllExceptionsFilter implements ExceptionFilter {
     const errorName = errorObj?.name || errorObj?.constructor?.name || 'Error';
     const rawErrorMessage = errorObj?.message || String(exception);
 
-    // 1. Database / Prisma Error Sanitization
+    // 1. Database / Prisma / Redis / RabbitMQ Infrastructure Error Sanitization
     if (
       errorName.includes('PrismaClient') ||
       rawErrorMessage.includes('Prisma') ||
       rawErrorMessage.includes('PostgreSQL') ||
-      rawErrorMessage.includes('pg_')
+      rawErrorMessage.includes('pg_') ||
+      rawErrorMessage.includes('Redis') ||
+      rawErrorMessage.includes('RabbitMQ') ||
+      rawErrorMessage.includes('amqp')
     ) {
       if (errorObj?.code === 'P2002') {
         status = HttpStatus.CONFLICT;
@@ -42,7 +45,8 @@ export class AllExceptionsFilter implements ExceptionFilter {
       } else if (
         errorName === 'PrismaClientInitializationError' ||
         rawErrorMessage.includes("Can't reach database server") ||
-        rawErrorMessage.includes('ECONNREFUSED')
+        rawErrorMessage.includes('ECONNREFUSED') ||
+        rawErrorMessage.includes('ENOTFOUND')
       ) {
         status = HttpStatus.SERVICE_UNAVAILABLE;
         code = 'SERVICE_UNAVAILABLE';
@@ -50,7 +54,7 @@ export class AllExceptionsFilter implements ExceptionFilter {
       } else {
         status = HttpStatus.INTERNAL_SERVER_ERROR;
         code = 'INTERNAL_SERVER_ERROR';
-        message = 'A database error occurred.';
+        message = 'An infrastructure error occurred.';
       }
     }
     // 2. Network / Connection Failures
@@ -99,9 +103,13 @@ export class AllExceptionsFilter implements ExceptionFilter {
       message = 'An unexpected error occurred.';
     }
 
-    // INTERNAL LOGGING: Retain detailed error, stack trace, and request ID
+    // INTERNAL LOGGING: Log scrubbed internal error details with request context
+    const sanitizedInternalLog = this.scrubSensitiveLogDetails(
+      `[API Error] ${request.method} ${request.url} -> HTTP ${status} (${code}): ${rawErrorMessage}`
+    );
+
     this.logger.error(
-      `[API Error] ${request.method} ${request.url} -> HTTP ${status} (${code}): ${rawErrorMessage}`,
+      sanitizedInternalLog,
       exception instanceof Error ? exception.stack : undefined,
     );
 
@@ -148,19 +156,38 @@ export class AllExceptionsFilter implements ExceptionFilter {
 
   private sanitizeMessage(msg: string): string {
     if (!msg) return 'An error occurred.';
+    const lower = msg.toLowerCase();
+
+    // Check for infrastructure, connection strings, SQL query syntax, filesystem paths, or secret assignments
     if (
-      msg.includes('Prisma') ||
-      msg.includes('PostgreSQL') ||
-      msg.includes('ECONNREFUSED') ||
-      msg.includes('127.0.0.1') ||
-      msg.includes('localhost') ||
-      msg.includes('node_modules') ||
-      msg.includes('SELECT') ||
-      msg.includes('INSERT') ||
-      msg.includes('UPDATE')
+      lower.includes('prisma') ||
+      lower.includes('postgresql') ||
+      lower.includes('postgres://') ||
+      lower.includes('redis://') ||
+      lower.includes('amqp://') ||
+      lower.includes('axios') ||
+      lower.includes('econnrefused') ||
+      lower.includes('enotfound') ||
+      lower.includes('etimedout') ||
+      lower.includes('127.0.0.1') ||
+      lower.includes('localhost') ||
+      lower.includes('node_modules') ||
+      lower.includes('select ') ||
+      lower.includes('insert into') ||
+      lower.includes('update ') ||
+      lower.includes('delete from') ||
+      lower.includes('bearer eyj') ||
+      lower.includes('password=') ||
+      lower.includes('secret=')
     ) {
       return 'An unexpected internal error occurred.';
     }
     return msg;
+  }
+
+  private scrubSensitiveLogDetails(logText: string): string {
+    return logText
+      .replace(/Bearer\s+[A-Za-z0-9-_=]+\.[A-Za-z0-9-_=]+\.?[A-Za-z0-9-_.+/=]*/gi, 'Bearer [REDACTED]')
+      .replace(/(password|secret|key|token)=[^&\s]+/gi, '$1=[REDACTED]');
   }
 }

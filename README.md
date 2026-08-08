@@ -159,24 +159,46 @@ ForgeGate/
    ```bash
    cp .env.example .env
    ```
+   > [!IMPORTANT]
+   > Do **not** commit your active `.env` file to version control. Set custom secrets (`JWT_ACCESS_SECRET`, `JWT_REFRESH_SECRET`, `POSTGRES_PASSWORD`) in production environments.
 
-3. **Database Schema Sync**:
+3. **Docker Compose Launch & Network Architecture**:
+   ForgeGate enforces isolated internal container networking (`forgegate_internal`).
+   
+   | Service | Production Exposed Port | Local Development Exposed Port | Access Description |
+   | :--- | :---: | :---: | :--- |
+   | **API Gateway** | `3000` | `3000` | Primary external ingress API point |
+   | **PostgreSQL** | Internal Only | `127.0.0.1:5432` | Multi-schema relational database |
+   | **Redis** | Internal Only | `127.0.0.1:6379` | Cache, queues & rate limiting |
+   | **RabbitMQ** | Internal Only | `127.0.0.1:5672` | Message broker |
+   | **RabbitMQ Management** | Internal Only | `127.0.0.1:15672` | UI Dashboard (`http://localhost:15672`) |
+   | **Prometheus** | Internal Only | `127.0.0.1:9090` | Metrics Scraper (`http://localhost:9090`) |
+
+   ```bash
+   # Development (Applies docker-compose.override.yml automatically for localhost port access)
+   docker compose up -d
+
+   # Production Deployment (Isolates infrastructure services to internal network)
+   docker compose -f docker-compose.yml up -d
+   ```
+
+4. **Database Schema Sync**:
    ```bash
    npx prisma db push
    pnpm run prisma:seed
    ```
 
-4. **Build All Workspace Packages & Services**:
+5. **Build All Workspace Packages & Services**:
    ```bash
    pnpm run build
    ```
 
-5. **Execute Automated Test Suite**:
+6. **Execute Automated Test Suite**:
    ```bash
    npx jest
    ```
 
-6. **Start Microservices**:
+7. **Start Microservices**:
    ```bash
    # API Gateway (Port 3000)
    pnpm --filter api-gateway run start:dev

@@ -326,4 +326,46 @@ describe('Crash-Safe Workflow Step Recovery Tests', () => {
       });
     });
   });
+
+  describe('Scenario G: Concurrent recovery workers', () => {
+    it('should ensure only one worker claims and re-enqueues a stale step execution', async () => {
+      const sixtySecondsAgo = new Date(Date.now() - 60000);
+      const mockStaleStep = {
+        id: 'stale-step-concurrent',
+        executionId: 'exec-concurrent',
+        stepId: 'step-1',
+        status: 'RUNNING',
+        heartbeatAt: sixtySecondsAgo,
+        execution: { id: 'exec-concurrent', tenantId: 'tenant-1', status: 'running' },
+      };
+
+      prismaMock.stepExecution.findMany.mockResolvedValue([mockStaleStep]);
+      
+      // Worker 1 updateMany returns { count: 1 } (claim succeeded)
+      // Worker 2 updateMany returns { count: 0 } (already claimed)
+      prismaMock.stepExecution.updateMany
+        .mockResolvedValueOnce({ count: 1 })
+        .mockResolvedValueOnce({ count: 0 });
+      prismaMock.workflowExecution.update.mockResolvedValue({});
+
+      const worker1Recovery = await engineService.findAndMarkStaleStepExecutions(30000);
+      const worker2Recovery = await engineService.findAndMarkStaleStepExecutions(30000);
+
+      expect(worker1Recovery).toEqual([{ executionId: 'exec-concurrent', tenantId: 'tenant-1' }]);
+      expect(worker2Recovery).toEqual([]); // Worker 2 gets empty list
+    });
+  });
+
+  describe('Scenario H: Healthy workers are not recovered', () => {
+    it('should ignore RUNNING steps with recent heartbeatAt within lease window', async () => {
+      // Step execution heartbeat updated 5s ago (healthy worker)
+      prismaMock.stepExecution.findMany.mockResolvedValue([]); // Prisma query filters out heartbeatAt > cutoffTime
+
+      const staleList = await engineService.findAndMarkStaleStepExecutions(30000);
+
+      expect(staleList).toEqual([]);
+      expect(prismaMock.stepExecution.updateMany).not.toHaveBeenCalled();
+    });
+  });
 });
+

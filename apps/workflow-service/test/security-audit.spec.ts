@@ -1,4 +1,4 @@
-import { HttpException, HttpStatus, BadRequestException, UnauthorizedException, ForbiddenException, NotFoundException, ConflictException } from '@nestjs/common';
+import { HttpException, HttpStatus, BadRequestException, UnauthorizedException, ForbiddenException, NotFoundException } from '@nestjs/common';
 import { AllExceptionsFilter } from '@forgegate/common';
 import { ProxyService } from '../../api-gateway/src/proxy/proxy.service';
 import { ExecutionService } from '../src/execution/execution.service';
@@ -86,7 +86,7 @@ describe('ForgeGate API Information Disclosure & Security Audit Test Suite', () 
     });
   });
 
-  describe('2. Network / Connection Error Sanitization', () => {
+  describe('2. Network / Connection / Infrastructure Error Sanitization', () => {
     it('should sanitize ECONNREFUSED network failure without leaking IP/port', () => {
       const res = mockResponse();
       const req = { url: '/api/v1/proxy/auth', method: 'POST', headers: { 'x-correlation-id': 'corr-conn-refused' } };
@@ -115,6 +115,30 @@ describe('ForgeGate API Information Disclosure & Security Audit Test Suite', () 
       expect(payloadString).not.toContain('3001');
       expect(payloadString).not.toContain('ECONNREFUSED');
       expect(payloadString).not.toContain('stack');
+    });
+
+    it('should sanitize Redis & RabbitMQ connection errors without exposing hostnames or credentials', () => {
+      const res = mockResponse();
+      const req = { url: '/api/v1/queue/jobs', method: 'GET', headers: {} };
+      const redisError = new Error('Error connecting to Redis server at redis:6379 with password=supersecretpass');
+
+      filter.catch(redisError, mockHost(req, res) as any);
+
+      expect(res.status).toHaveBeenCalledWith(HttpStatus.INTERNAL_SERVER_ERROR);
+      expect(res.json).toHaveBeenCalledWith(
+        expect.objectContaining({
+          success: false,
+          error: {
+            code: 'INTERNAL_SERVER_ERROR',
+            message: 'An infrastructure error occurred.',
+          },
+        }),
+      );
+
+      const payloadString = JSON.stringify(res.json.mock.calls[0][0]);
+      expect(payloadString).not.toContain('supersecretpass');
+      expect(payloadString).not.toContain('redis:6379');
+      expect(payloadString).not.toContain('Redis');
     });
   });
 

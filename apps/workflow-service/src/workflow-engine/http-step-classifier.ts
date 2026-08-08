@@ -1,12 +1,18 @@
-export type HttpErrorCategory =
+export type HttpStepCategory =
+  | 'SUCCESS'
   | 'PERMANENT_FAILURE'
   | 'TRANSIENT_FAILURE'
   | 'RATE_LIMITED'
   | 'NETWORK_FAILURE'
   | 'TIMEOUT';
 
+/**
+ * @deprecated Use HttpStepCategory instead. Retained for backward compatibility.
+ */
+export type HttpErrorCategory = HttpStepCategory;
+
 export interface HttpClassificationResult {
-  category: HttpErrorCategory;
+  category: HttpStepCategory;
   isRetryable: boolean;
   statusCode?: number;
   subReason?: string;
@@ -17,7 +23,7 @@ export interface HttpClassificationResult {
 }
 
 export class HttpStepError extends Error {
-  public readonly category: HttpErrorCategory;
+  public readonly category: HttpStepCategory;
   public readonly isRetryable: boolean;
   public readonly statusCode?: number;
   public readonly subReason?: string;
@@ -169,6 +175,25 @@ export function classifyHttpError(error: any, url?: string, method?: string): Ht
     });
   }
 
+  // TLS / Certificate errors: permanent configuration failures, do not blindly retry
+  const TLS_ERROR_CODES = [
+    'UNABLE_TO_VERIFY_LEAF_SIGNATURE',
+    'CERT_HAS_EXPIRED',
+    'DEPTH_ZERO_SELF_SIGNED_CERT',
+    'SELF_SIGNED_CERT_IN_CHAIN',
+    'ERR_TLS_CERT_ALTNAME_INVALID',
+  ];
+  if (TLS_ERROR_CODES.includes(code) || errMsg.toLowerCase().includes('certificate')) {
+    return new HttpStepError({
+      category: 'PERMANENT_FAILURE',
+      isRetryable: false,
+      subReason: 'tls_certificate_error',
+      message: `HTTP ${methodStr} to ${targetUrl} failed: TLS/certificate error`,
+      url: targetUrl,
+      method: methodStr,
+    });
+  }
+
   if (code === 'ETIMEDOUT' || code === 'ESOCKETTIMEDOUT') {
     return new HttpStepError({
       category: 'TIMEOUT',
@@ -204,4 +229,26 @@ export function classifyHttpError(error: any, url?: string, method?: string): Ht
     url: targetUrl,
     method: methodStr,
   });
+}
+
+/**
+ * Classifies a successful HTTP response into a structured result.
+ * This provides a unified classification interface for both success and failure paths.
+ */
+export function classifyHttpSuccess(
+  statusCode: number,
+  url?: string,
+  method?: string,
+): HttpClassificationResult {
+  const methodStr = (method || 'GET').toUpperCase();
+  const targetUrl = url || 'unknown';
+  return {
+    category: 'SUCCESS',
+    isRetryable: false,
+    statusCode,
+    subReason: `success_${statusCode}`,
+    message: `HTTP ${methodStr} to ${targetUrl} succeeded (${statusCode})`,
+    url: targetUrl,
+    method: methodStr,
+  };
 }

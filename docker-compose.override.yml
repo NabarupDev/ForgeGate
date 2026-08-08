@@ -1,0 +1,26 @@
+# ==============================================================================
+# ForgeGate Local Development Docker Compose Override
+# Automatically merged by Docker Compose during local 'docker compose up'.
+# Binds infrastructure ports to local loopback (127.0.0.1) for local developer access.
+# In production, run 'docker compose -f docker-compose.yml up' or omit this file.
+# ==============================================================================
+
+version: '3.8'
+
+services:
+  postgres:
+    ports:
+      - "127.0.0.1:${POSTGRES_PORT:-5432}:5432"
+
+  redis:
+    ports:
+      - "127.0.0.1:${REDIS_PORT:-6379}:6379"
+
+  rabbitmq:
+    ports:
+      - "127.0.0.1:${RABBITMQ_PORT:-5672}:5672"
+      - "127.0.0.1:15672:15672" # RabbitMQ Management Web UI
+
+  prometheus:
+    ports:
+      - "127.0.0.1:9090:9090" # Local Prometheus Web UI

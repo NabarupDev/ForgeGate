@@ -26,6 +26,8 @@ export class QueueService implements OnModuleInit, OnModuleDestroy {
   private structuredLogger = new StructuredLogger('workflow-queue');
   private metricsService = MetricsService.getInstance();
 
+  private recoveryTimer: NodeJS.Timeout | null = null;
+
   constructor(private readonly engineService: WorkflowEngineService) {}
 
   async onModuleInit() {
@@ -36,6 +38,13 @@ export class QueueService implements OnModuleInit, OnModuleDestroy {
     this.workflowQueue = new Queue('workflow-executions', { connection });
     this.dlqQueue = new Queue('workflow-dlq', { connection });
     this.queueEvents = new QueueEvents('workflow-executions', { connection });
+
+    // Background scanner for stale step execution leases (scans every 15s for stale leases > 30s)
+    this.recoveryTimer = setInterval(() => {
+      this.recoverStaleExecutions(30000).catch((err) => {
+        this.structuredLogger.error('Stale recovery background scanner failed', err?.stack);
+      });
+    }, 15000);
 
     // Main execution worker with intelligent retry scheduling
     this.worker = new Worker(
@@ -171,6 +180,10 @@ export class QueueService implements OnModuleInit, OnModuleDestroy {
   }
 
   async onModuleDestroy() {
+    if (this.recoveryTimer) {
+      clearInterval(this.recoveryTimer);
+      this.recoveryTimer = null;
+    }
     await this.worker?.close();
     await this.dlqWorker?.close();
     await this.workflowQueue?.close();
