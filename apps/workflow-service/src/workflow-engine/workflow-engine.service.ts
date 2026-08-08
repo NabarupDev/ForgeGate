@@ -380,4 +380,10 @@ export class WorkflowEngineService {
       },
     });
   }
+
+  async getExecutionById(executionId: string) {
+    return this.prisma.workflowExecution.findUnique({
+      where: { id: executionId },
+    });
+  }
 }

@@ -124,6 +124,7 @@ export function classifyHttpError(error: any, url?: string, method?: string): Ht
         isRetryable: true,
         statusCode: status,
         subReason: `server_error_${status}`,
+        retryAfterSeconds,
         message: `HTTP ${methodStr} to ${targetUrl} failed: Server error (${status})`,
         url: targetUrl,
         method: methodStr,

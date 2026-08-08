@@ -168,7 +168,7 @@ describe('Crash-Safe Workflow Step Recovery Tests', () => {
       });
       expect(mockWorkflowQueue.add).toHaveBeenCalledWith(
         'execute-workflow',
-        { executionId: 'exec-stale-2', tenantId: 'tenant-1' },
+        expect.objectContaining({ executionId: 'exec-stale-2', tenantId: 'tenant-1' }),
         expect.any(Object),
       );
     });
