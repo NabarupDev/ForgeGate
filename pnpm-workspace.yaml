@@ -8,3 +8,4 @@ allowBuilds:
   argon2: true
   msgpackr-extract: true
   prisma: true
+  unrs-resolver: set this to true or false

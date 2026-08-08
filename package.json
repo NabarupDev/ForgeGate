@@ -6,6 +6,7 @@
   "scripts": {
     "build": "pnpm --filter \"./packages/*\" run build && pnpm --filter \"./apps/*\" run build",
     "lint": "pnpm -r run lint",
+    "test": "jest",
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate dev",
     "prisma:seed": "ts-node prisma/seed.ts",
@@ -21,8 +22,11 @@
     "rxjs": "^7.8.2"
   },
   "devDependencies": {
+    "@types/jest": "^30.0.0",
     "@types/node": "^20.19.43",
+    "jest": "^30.4.2",
     "prisma": "^5.22.0",
+    "ts-jest": "^29.4.12",
     "ts-node": "^10.9.2",
     "typescript": "^5.9.3"
   }
