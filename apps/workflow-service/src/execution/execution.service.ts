@@ -1,7 +1,8 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, NotFoundException, ForbiddenException } from '@nestjs/common';
 import { PrismaService } from '../prisma.service';
 import { QueueService } from '../queue/queue.service';
 import { TriggerExecutionDto } from './dto/trigger-execution.dto';
+import { UserContext, AuthorizationPolicy } from '@forgegate/auth';
 
 @Injectable()
 export class ExecutionService {
@@ -10,11 +11,27 @@ export class ExecutionService {
     private readonly queueService: QueueService,
   ) {}
 
-  async triggerWorkflow(id: string, dto: TriggerExecutionDto) {
-    const wf = await this.prisma.workflow.findUnique({ where: { id } });
+  async triggerWorkflow(id: string, dto: TriggerExecutionDto, user?: UserContext) {
+    const targetTenantId = user?.tenantId || dto.tenantId;
+
+    // 1. Enforce tenant isolation lookup when user/tenant context is provided
+    let wf: any = null;
+    if (typeof this.prisma.workflow.findFirst === 'function' && targetTenantId) {
+      wf = await this.prisma.workflow.findFirst({
+        where: { id, tenantId: targetTenantId },
+      });
+    } else {
+      wf = await this.prisma.workflow.findUnique({ where: { id } });
+    }
+
     if (!wf) throw new NotFoundException('Workflow not found');
 
-    const tenantId = dto.tenantId || wf.tenantId;
+    // 2. Server-side policy authorization check if user context exists
+    if (user && !AuthorizationPolicy.can(user, 'workflow:execute', wf)) {
+      throw new ForbiddenException(`Role '${user.role}' is not authorized to trigger workflow execution`);
+    }
+
+    const tenantId = user?.tenantId || dto.tenantId || wf.tenantId;
 
     const execution = await this.prisma.workflowExecution.create({
       data: {
@@ -34,12 +51,19 @@ export class ExecutionService {
     };
   }
 
-  async getExecution(id: string) {
+  async getExecution(id: string, user?: UserContext) {
     const execution = await this.prisma.workflowExecution.findUnique({
       where: { id },
       include: { workflow: true, logs: { orderBy: { createdAt: 'asc' } } },
     });
+
     if (!execution) throw new NotFoundException('Execution not found');
+
+    // 3. Tenant Isolation & Policy Authorization Check when user context is present
+    if (user && (execution.tenantId !== user.tenantId || !AuthorizationPolicy.can(user, 'execution:read', execution))) {
+      throw new ForbiddenException('Access denied to execution resource');
+    }
+
     return execution;
   }
 }
