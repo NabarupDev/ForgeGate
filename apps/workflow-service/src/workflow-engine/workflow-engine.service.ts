@@ -4,6 +4,7 @@ import { StructuredLogger } from '@forgegate/logger';
 import axios from 'axios';
 import { classifyHttpError, HttpStepError } from './http-step-classifier';
 import { resolveHttpTimeout } from './http-timeout-resolver';
+import { generateStepIdempotencyKey } from './idempotency';
 
 function sanitizePayload(data: any): any {
   if (data === null || data === undefined) return data;
@@ -167,7 +168,11 @@ export class WorkflowEngineService {
 
         let stepResult: any;
         try {
-          stepResult = await this.executeStep(step, stepPayloadInput);
+          stepResult = await this.executeStep(step, stepPayloadInput, {
+            tenantId: execution.tenantId,
+            executionId: execution.id,
+            stepId: step.id,
+          });
 
           // 3. Transition StepExecution RUNNING -> SUCCEEDED
           await this.prisma.stepExecution.update({
@@ -318,15 +323,34 @@ export class WorkflowEngineService {
     return Array.from(recoveredMap.values());
   }
 
-  private async executeStep(step: any, input: any): Promise<any> {
+  private async executeStep(
+    step: any,
+    input: any,
+    context?: { tenantId: string; executionId: string; stepId: string },
+  ): Promise<any> {
     const config = step.config || {};
 
     switch (step.actionType) {
       case 'http_request': {
         const url = config.url || 'https://httpbin.org/get';
         const method = (config.method || 'GET').toUpperCase();
-        const headers = config.headers || {};
+        const headers = { ...(config.headers || {}) };
         const body = config.body || input;
+
+        const idempotencyConfig = config.idempotency || {};
+        const isIdempotencyEnabled =
+          idempotencyConfig.enabled === true || Boolean(config.idempotencyKeyHeader);
+        const headerName =
+          idempotencyConfig.headerName || config.idempotencyKeyHeader || 'Idempotency-Key';
+
+        if (isIdempotencyEnabled && context) {
+          const idempotencyKey = generateStepIdempotencyKey(
+            context.tenantId,
+            context.executionId,
+            context.stepId,
+          );
+          headers[headerName] = idempotencyKey;
+        }
 
         let timeoutMs: number;
         try {
