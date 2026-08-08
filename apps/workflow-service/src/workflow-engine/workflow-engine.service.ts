@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../prisma.service';
 import { StructuredLogger } from '@forgegate/logger';
+import { MetricsService } from '@forgegate/common';
 import axios from 'axios';
 import { classifyHttpError, HttpStepError } from './http-step-classifier';
 import { resolveHttpTimeout } from './http-timeout-resolver';
@@ -43,6 +44,7 @@ function sanitizePayload(data: any): any {
 @Injectable()
 export class WorkflowEngineService {
   private structuredLogger = new StructuredLogger('workflow-engine');
+  private metricsService = MetricsService.getInstance();
 
   constructor(
     private readonly prisma: PrismaService,
@@ -50,7 +52,12 @@ export class WorkflowEngineService {
     private readonly outboundConcurrencyLimiter?: OutboundConcurrencyLimiter,
   ) {}
 
-  async executeExecution(executionId: string, tenantId: string, attemptCount: number = 1): Promise<any> {
+  async executeExecution(
+    executionId: string,
+    tenantId: string,
+    attemptCount: number = 1,
+    correlationId?: string,
+  ): Promise<any> {
     const startTime = Date.now();
     const workerId = process.env.HOSTNAME || `worker-${process.pid}`;
 
@@ -71,6 +78,14 @@ export class WorkflowEngineService {
       throw new Error(`Workflow execution ${executionId} not found for tenant ${tenantId}`);
     }
 
+    const effectiveCorrelationId =
+      correlationId ||
+      (execution.metadata as any)?.correlationId ||
+      `corr-${executionId}`;
+
+    // Metric: Workflow execution started
+    this.metricsService.workflowExecutionsTotal.inc({ status: 'started' });
+
     // State transition to 'running' or 'retrying'
     const statusState = attemptCount > 1 ? 'retrying' : 'running';
     await this.prisma.workflowExecution.update({
@@ -82,6 +97,7 @@ export class WorkflowEngineService {
       tenantId,
       workflowId: execution.workflowId,
       executionId: execution.id,
+      correlationId: effectiveCorrelationId,
       attemptCount,
       workerId,
     });
@@ -109,6 +125,7 @@ export class WorkflowEngineService {
           this.structuredLogger.logEvent('step_already_completed_skipping', {
             executionId: execution.id,
             stepId: step.id,
+            correlationId: effectiveCorrelationId,
             stepOrder: step.stepOrder,
           });
 
@@ -125,6 +142,9 @@ export class WorkflowEngineService {
           where: { id: executionId },
           data: { currentStep: step.stepOrder },
         });
+
+        // Metric: Step execution started
+        this.metricsService.stepExecutionsTotal.inc({ action_type: step.actionType, status: 'started' });
 
         // 1. Create StepExecution in PENDING state
         const stepExec = await this.prisma.stepExecution.create({
@@ -156,6 +176,7 @@ export class WorkflowEngineService {
           this.structuredLogger.warn(`Could not claim step ${step.id} for execution ${execution.id}`, {
             executionId: execution.id,
             stepId: step.id,
+            correlationId: effectiveCorrelationId,
           });
           continue;
         }
@@ -178,6 +199,7 @@ export class WorkflowEngineService {
             tenantId: execution.tenantId,
             executionId: execution.id,
             stepId: step.id,
+            correlationId: effectiveCorrelationId,
           });
 
           // 3. Transition StepExecution RUNNING -> SUCCEEDED
@@ -189,6 +211,9 @@ export class WorkflowEngineService {
               output: sanitizePayload(stepResult) as any,
             },
           });
+
+          // Metric: Step succeeded
+          this.metricsService.stepExecutionsTotal.inc({ action_type: step.actionType, status: 'succeeded' });
         } catch (stepErr: any) {
           const isHttpErr = stepErr instanceof HttpStepError;
           const isTimeout =
@@ -199,6 +224,16 @@ export class WorkflowEngineService {
             stepErr.code === 'ETIMEDOUT';
 
           const endStatus = isTimeout ? 'TIMED_OUT' : 'FAILED';
+
+          // Metric: Step failed / timed out
+          this.metricsService.stepExecutionsTotal.inc({
+            action_type: step.actionType,
+            status: isTimeout ? 'timed_out' : 'failed',
+          });
+
+          if (isTimeout) {
+            this.metricsService.stepTimeoutsTotal.inc({ action_type: step.actionType });
+          }
 
           // Transition StepExecution RUNNING -> FAILED / TIMED_OUT
           await this.prisma.stepExecution.update({
@@ -244,16 +279,24 @@ export class WorkflowEngineService {
         },
       });
 
+      // Metrics: Workflow succeeded
+      this.metricsService.workflowExecutionsTotal.inc({ status: 'succeeded' });
+      this.metricsService.workflowDuration.observe({ status: 'succeeded' }, durationMs / 1000);
+
       this.structuredLogger.logEvent('workflow_execution_completed', {
         tenantId,
         workflowId: execution.workflowId,
         executionId: execution.id,
+        correlationId: effectiveCorrelationId,
         durationMs,
       });
 
       return { status: 'completed', durationMs };
     } catch (error: any) {
       const durationMs = Date.now() - startTime;
+      const isTimeout = error.category === 'TIMEOUT';
+      const endStatus = isTimeout ? 'timed_out' : 'failed';
+
       await this.prisma.executionLog.create({
         data: {
           executionId: execution.id,
@@ -262,10 +305,15 @@ export class WorkflowEngineService {
         },
       });
 
+      // Metrics: Workflow failed / timed out
+      this.metricsService.workflowExecutionsTotal.inc({ status: endStatus });
+      this.metricsService.workflowDuration.observe({ status: endStatus }, durationMs / 1000);
+
       this.structuredLogger.error('Workflow step execution failed', error.stack, {
         tenantId,
         workflowId: execution.workflowId,
         executionId: execution.id,
+        correlationId: effectiveCorrelationId,
         durationMs,
       });
 
@@ -376,7 +424,7 @@ export class WorkflowEngineService {
   private async executeStep(
     step: any,
     input: any,
-    context?: { tenantId: string; executionId: string; stepId: string },
+    context?: { tenantId: string; executionId: string; stepId: string; correlationId?: string },
   ): Promise<any> {
     const config = step.config || {};
 
@@ -386,6 +434,19 @@ export class WorkflowEngineService {
         const method = (config.method || 'GET').toUpperCase();
         const headers = { ...(config.headers || {}) };
         const body = config.body || input;
+
+        // Low-cardinality provider hostname for metrics
+        let providerHost = 'unknown';
+        try {
+          providerHost = new URL(url).hostname;
+        } catch {
+          // Fallback
+        }
+
+        // Attach x-correlation-id to outbound HTTP header for end-to-end tracing
+        if (context?.correlationId) {
+          headers['x-correlation-id'] = context.correlationId;
+        }
 
         const idempotencyConfig = config.idempotency || {};
         const isIdempotencyEnabled =
@@ -425,6 +486,11 @@ export class WorkflowEngineService {
           });
 
           if (!checkResult.allowed) {
+            // Metrics: Backpressure rate limit rejection & deferral
+            this.metricsService.backpressureRejectionsTotal.inc({ type: 'rate_limit' });
+            this.metricsService.backpressureDeferredJobsTotal.inc({ reason: 'rate_limit' });
+            this.metricsService.outboundHttpRateLimitDeferralsTotal.inc({ provider: providerHost });
+
             throw new HttpStepError({
               category: 'RATE_LIMITED',
               isRetryable: true,
@@ -447,6 +513,10 @@ export class WorkflowEngineService {
           });
 
           if (!concResult.acquired) {
+            // Metrics: Backpressure concurrency rejection & deferral
+            this.metricsService.backpressureRejectionsTotal.inc({ type: 'concurrency' });
+            this.metricsService.backpressureDeferredJobsTotal.inc({ reason: 'concurrency' });
+
             throw new HttpStepError({
               category: 'RATE_LIMITED',
               isRetryable: true,
@@ -460,6 +530,7 @@ export class WorkflowEngineService {
           concurrencyLease = concResult.lease;
         }
 
+        const httpStartTime = Date.now();
         try {
           const response = await axios({
             url,
@@ -468,9 +539,31 @@ export class WorkflowEngineService {
             data: method !== 'GET' ? body : undefined,
             timeout: timeoutMs,
           });
+
+          const httpDurationMs = Date.now() - httpStartTime;
+          this.metricsService.outboundHttpRequestsTotal.inc({
+            provider: providerHost,
+            status_code: String(response.status),
+          });
+          this.metricsService.outboundHttpRequestDuration.observe({ provider: providerHost }, httpDurationMs / 1000);
+
           return { statusCode: response.status, data: response.data };
         } catch (err: any) {
-          throw classifyHttpError(err, url, method);
+          const httpDurationMs = Date.now() - httpStartTime;
+          const classifiedErr = classifyHttpError(err, url, method);
+
+          const statusCode = String(classifiedErr.statusCode || (err.response?.status) || 500);
+          this.metricsService.outboundHttpRequestsTotal.inc({ provider: providerHost, status_code: statusCode });
+          this.metricsService.outboundHttpRequestDuration.observe({ provider: providerHost }, httpDurationMs / 1000);
+
+          if (classifiedErr.category === 'RATE_LIMITED') {
+            this.metricsService.outboundHttpRateLimitDeferralsTotal.inc({ provider: providerHost });
+          }
+          if (classifiedErr.category === 'TIMEOUT') {
+            this.metricsService.outboundHttpTimeoutsTotal.inc({ provider: providerHost });
+          }
+
+          throw classifiedErr;
         } finally {
           if (this.outboundConcurrencyLimiter && concurrencyLease) {
             await this.outboundConcurrencyLimiter.release(concurrencyLease);

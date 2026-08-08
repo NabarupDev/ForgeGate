@@ -1,6 +1,7 @@
 import { Injectable, OnModuleInit, OnModuleDestroy } from '@nestjs/common';
 import { Queue, Worker, QueueEvents, Job } from 'bullmq';
 import { StructuredLogger } from '@forgegate/logger';
+import { MetricsService } from '@forgegate/common';
 import { WorkflowEngineService } from '../workflow-engine/workflow-engine.service';
 import { calculateRetryDecision } from '../workflow-engine/http-retry-scheduler';
 
@@ -23,6 +24,7 @@ export class QueueService implements OnModuleInit, OnModuleDestroy {
   private dlqWorker!: Worker;
   private queueEvents!: QueueEvents;
   private structuredLogger = new StructuredLogger('workflow-queue');
+  private metricsService = MetricsService.getInstance();
 
   constructor(private readonly engineService: WorkflowEngineService) {}
 
@@ -39,9 +41,9 @@ export class QueueService implements OnModuleInit, OnModuleDestroy {
     this.worker = new Worker(
       'workflow-executions',
       async (job: Job) => {
-        const { executionId, tenantId } = job.data;
+        const { executionId, tenantId, correlationId } = job.data;
         const currentAttempt = job.data.normalAttempts ? job.data.normalAttempts : job.attemptsMade + 1;
-        return this.engineService.executeExecution(executionId, tenantId, currentAttempt);
+        return this.engineService.executeExecution(executionId, tenantId, currentAttempt, correlationId);
       },
       {
         connection,
@@ -53,12 +55,14 @@ export class QueueService implements OnModuleInit, OnModuleDestroy {
       this.structuredLogger.logEvent('job_completed', {
         jobId: job.id,
         executionId: job.data.executionId,
+        correlationId: job.data.correlationId,
       });
+      this.updateQueueGauges();
     });
 
     this.worker.on('failed', async (job: Job | undefined, err: Error) => {
       if (!job) return;
-      const { executionId, tenantId, rateLimitDeferrals = 0, normalAttempts = 1 } = job.data;
+      const { executionId, tenantId, rateLimitDeferrals = 0, normalAttempts = 1, correlationId } = job.data;
 
       let createdAt = new Date();
       try {
@@ -73,9 +77,12 @@ export class QueueService implements OnModuleInit, OnModuleDestroy {
       const decision = calculateRetryDecision(err, normalAttempts, rateLimitDeferrals, createdAt);
 
       if (decision.shouldRetry) {
+        this.metricsService.stepRetriesTotal.inc({ action_type: 'http_request' });
+
         this.structuredLogger.logEvent('job_retry_scheduled', {
           jobId: job.id,
           executionId,
+          correlationId,
           delayMs: decision.delayMs,
           reason: decision.reason,
           isRateLimitDeferral: decision.isRateLimitDeferral,
@@ -88,6 +95,7 @@ export class QueueService implements OnModuleInit, OnModuleDestroy {
           {
             executionId,
             tenantId,
+            correlationId,
             rateLimitDeferrals: decision.newRateLimitDeferralsCount,
             normalAttempts: decision.newNormalAttemptCount,
           },
@@ -127,7 +135,7 @@ export class QueueService implements OnModuleInit, OnModuleDestroy {
           finalErrorMessage: sanitizedMessage,
           timestamp: new Date().toISOString(),
           lastAttemptTimestamp: new Date().toISOString(),
-          correlationId: job.data.correlationId || `corr-${executionId}`,
+          correlationId: correlationId || `corr-${executionId}`,
           replayed: false,
           replayedAt: null,
           errorReason: `${sanitizedMessage} (${decision.reason})`,
@@ -136,24 +144,30 @@ export class QueueService implements OnModuleInit, OnModuleDestroy {
         this.structuredLogger.error(
           `Job ${job.id} will not be retried (${decision.reason}). Moving to DLQ.`,
           err.stack,
-          { executionId, tenantId, dlqData },
+          { executionId, tenantId, correlationId, dlqData },
         );
 
         await this.dlqQueue.add('dead-letter-job', dlqData);
-
         await this.engineService.markAsFailed(executionId, `${sanitizedMessage} (${decision.reason})`);
       }
+
+      this.updateQueueGauges();
     });
 
     // DLQ worker stub to process or hold dead letters
     this.dlqWorker = new Worker(
       'workflow-dlq',
       async (job: Job) => {
-        this.structuredLogger.log(`DLQ Job registered: ${job.id}`, { executionId: job.data.executionId });
+        this.structuredLogger.log(`DLQ Job registered: ${job.id}`, {
+          executionId: job.data.executionId,
+          correlationId: job.data.correlationId,
+        });
         return { status: 'in_dlq', data: job.data };
       },
       { connection },
     );
+
+    this.updateQueueGauges();
   }
 
   async onModuleDestroy() {
@@ -164,23 +178,49 @@ export class QueueService implements OnModuleInit, OnModuleDestroy {
     await this.queueEvents?.close();
   }
 
-  async enqueueWorkflowExecution(executionId: string, tenantId: string) {
-    const job = await this.workflowQueue.add(
-      'execute-workflow',
-      { executionId, tenantId, rateLimitDeferrals: 0, normalAttempts: 1 },
-      {
-        removeOnComplete: false,
-        removeOnFail: false,
-      },
-    );
+  private async updateQueueGauges() {
+    try {
+      if (!this.workflowQueue || !this.dlqQueue) return;
+      const waitingJobs = await this.workflowQueue.getWaitingCount();
+      const activeJobs = await this.workflowQueue.getActiveCount();
+      const failedJobs = await this.workflowQueue.getFailedCount();
+      const dlqJobs = await this.dlqQueue.getJobs(['waiting', 'active', 'completed', 'failed']);
+
+      this.metricsService.waitingJobsGauge.set(waitingJobs);
+      this.metricsService.activeJobsGauge.set(activeJobs);
+      this.metricsService.failedJobsGauge.set(failedJobs);
+      this.metricsService.queueDepthGauge.set(waitingJobs + activeJobs);
+      this.metricsService.dlqSizeGauge.set(dlqJobs.length);
+    } catch {
+      // Non-blocking gauge updates
+    }
+  }
+
+  async enqueueWorkflowExecution(executionId: string, tenantId: string, correlationId?: string) {
+    const effectiveCorrelationId = correlationId || `corr-${executionId}`;
+    let jobId = `job-${executionId}`;
+
+    if (this.workflowQueue && typeof this.workflowQueue.add === 'function') {
+      const job = await this.workflowQueue.add(
+        'execute-workflow',
+        { executionId, tenantId, correlationId: effectiveCorrelationId, rateLimitDeferrals: 0, normalAttempts: 1 },
+        {
+          removeOnComplete: false,
+          removeOnFail: false,
+        },
+      );
+      if (job) jobId = job.id;
+    }
 
     this.structuredLogger.logEvent('job_enqueued', {
-      jobId: job.id,
+      jobId,
       executionId,
       tenantId,
+      correlationId: effectiveCorrelationId,
     });
 
-    return { jobId: job.id };
+    this.updateQueueGauges();
+    return { jobId };
   }
 
   /**
@@ -192,7 +232,10 @@ export class QueueService implements OnModuleInit, OnModuleDestroy {
     const reenqueuedIds: string[] = [];
 
     for (const item of staleList) {
-      const activeJobs = await this.workflowQueue.getJobs(['active', 'waiting', 'delayed']);
+      const activeJobs =
+        this.workflowQueue && typeof this.workflowQueue.getJobs === 'function'
+          ? await this.workflowQueue.getJobs(['active', 'waiting', 'delayed'])
+          : [];
       const alreadyQueued = activeJobs.some((j) => j.data.executionId === item.executionId);
 
       if (!alreadyQueued) {
@@ -213,22 +256,26 @@ export class QueueService implements OnModuleInit, OnModuleDestroy {
     };
   }
 
-  async addExecutionJob(executionId: string, tenantId: string) {
-    const res = await this.enqueueWorkflowExecution(executionId, tenantId);
+  async addExecutionJob(executionId: string, tenantId: string, correlationId?: string) {
+    const res = await this.enqueueWorkflowExecution(executionId, tenantId, correlationId);
     return { jobId: res.jobId, status: 'enqueued' };
   }
 
   async replayDlqJob(jobId: string, operatorId: string = 'operator') {
+    if (!this.dlqQueue) {
+      throw new Error(`DLQ Queue unavailable`);
+    }
+
     const job = await this.dlqQueue.getJob(jobId);
     if (!job) {
       throw new Error(`DLQ Job ${jobId} not found`);
     }
 
-    const { executionId, tenantId, replayed } = job.data;
+    const { executionId, tenantId, replayed, correlationId } = job.data;
 
     // 1. Prevent duplicate replay if already replayed or currently active in queue
     const activeJobs =
-      typeof this.workflowQueue.getJobs === 'function'
+      this.workflowQueue && typeof this.workflowQueue.getJobs === 'function'
         ? await this.workflowQueue.getJobs(['active', 'waiting', 'delayed'])
         : [];
     const isCurrentlyActive = activeJobs.some((j) => j.data?.executionId === executionId);
@@ -263,7 +310,7 @@ export class QueueService implements OnModuleInit, OnModuleDestroy {
     }
 
     // 4. Enqueue execution with fresh attempt counter (preserving step execution history)
-    const res = await this.enqueueWorkflowExecution(executionId, tenantId);
+    const res = await this.enqueueWorkflowExecution(executionId, tenantId, correlationId);
 
     return {
       jobId: res.jobId,
@@ -274,6 +321,16 @@ export class QueueService implements OnModuleInit, OnModuleDestroy {
   }
 
   async getMetrics() {
+    if (!this.workflowQueue || !this.dlqQueue) {
+      return {
+        activeJobs: 0,
+        waitingJobs: 0,
+        completedJobs: 0,
+        failedJobs: 0,
+        dlqCount: 0,
+        totalQueueSize: 0,
+      };
+    }
     const waitingJobs = await this.workflowQueue.getWaitingCount();
     const activeJobs = await this.workflowQueue.getActiveCount();
     const completedJobs = await this.workflowQueue.getCompletedCount();
@@ -290,6 +347,7 @@ export class QueueService implements OnModuleInit, OnModuleDestroy {
   }
 
   async getDlqJobs() {
+    if (!this.dlqQueue) return [];
     const jobs = await this.dlqQueue.getJobs(['waiting', 'active', 'completed', 'failed']);
     return jobs.map((job) => {
       const d = job.data || {};
@@ -321,6 +379,7 @@ export class QueueService implements OnModuleInit, OnModuleDestroy {
   }
 
   async replayDeadLetterExecution(executionId: string, tenantId: string) {
+    if (!this.dlqQueue) return this.enqueueWorkflowExecution(executionId, tenantId);
     const dlqJobs = await this.dlqQueue.getJobs(['waiting', 'active', 'completed', 'failed']);
     const matchingJob = dlqJobs.find((j) => j.data.executionId === executionId && !j.data.replayed);
     if (matchingJob) {
@@ -330,6 +389,7 @@ export class QueueService implements OnModuleInit, OnModuleDestroy {
   }
 
   async getExecutionStatus(executionId: string) {
+    if (!this.workflowQueue) return { status: 'not_found' };
     const jobs = await this.workflowQueue.getJobs(['active', 'waiting', 'completed', 'failed']);
     const job = jobs.find((j) => j.data.executionId === executionId);
 

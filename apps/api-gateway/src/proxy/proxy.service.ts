@@ -14,6 +14,11 @@ export class ProxyService {
     const baseUrl = this.getServiceUrl(service);
     const targetUrl = `${baseUrl}/${path}`;
 
+    const correlationId =
+      headers['x-correlation-id'] ||
+      headers['x-request-id'] ||
+      `corr-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
+
     const config: AxiosRequestConfig = {
       url: targetUrl,
       method,
@@ -23,6 +28,7 @@ export class ProxyService {
         'content-type': headers['content-type'] || 'application/json',
         authorization: headers['authorization'] || '',
         'x-tenant-id': headers['x-tenant-id'] || '',
+        'x-correlation-id': correlationId,
       },
       timeout: 10000,
     };
@@ -38,6 +44,7 @@ export class ProxyService {
         method,
         statusCode: response.status,
         durationMs,
+        correlationId,
       });
 
       return response.data;
@@ -51,6 +58,7 @@ export class ProxyService {
         targetUrl,
         statusCode,
         durationMs,
+        correlationId,
       });
 
       throw new HttpException(message, statusCode);

@@ -139,7 +139,7 @@ describe('DLQ Diagnostic Metadata, Sanitization & Replay Spec', () => {
       // 3. Execution enqueued into workflow queue
       expect(workflowQueueMock.add).toHaveBeenCalledWith(
         'execute-workflow',
-        { executionId: 'exec-dlq-1', tenantId: 'tenant-acme', rateLimitDeferrals: 0, normalAttempts: 1 },
+        expect.objectContaining({ executionId: 'exec-dlq-1', tenantId: 'tenant-acme', rateLimitDeferrals: 0, normalAttempts: 1 }),
         expect.any(Object),
       );
     });

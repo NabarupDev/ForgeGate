@@ -1,4 +1,4 @@
-import { Controller, Post, Get, Body, Param, UseGuards } from '@nestjs/common';
+import { Controller, Post, Get, Body, Param, Headers, UseGuards } from '@nestjs/common';
 import { ExecutionService } from './execution.service';
 import { TriggerExecutionDto } from './dto/trigger-execution.dto';
 import { JwtAuthGuard, CurrentUser, UserContext } from '@forgegate/auth';
@@ -17,8 +17,18 @@ export class ExecutionController {
   async triggerWorkflow(
     @Param('id') id: string,
     @Body() dto: TriggerExecutionDto,
+    @Headers('x-correlation-id') correlationHeader: string,
     @CurrentUser() user: UserContext,
   ) {
-    return this.executionService.triggerWorkflow(id, dto, user);
+    const correlationId =
+      correlationHeader ||
+      dto.metadata?.correlationId ||
+      `corr-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
+
+    return this.executionService.triggerWorkflow(
+      id,
+      { ...dto, metadata: { ...dto.metadata, correlationId } },
+      user,
+    );
   }
 }
