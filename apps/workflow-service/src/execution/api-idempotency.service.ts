@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, OnModuleDestroy } from '@nestjs/common';
 import Redis from 'ioredis';
 
 export interface IdempotencyRecord<T = any> {
@@ -8,7 +8,7 @@ export interface IdempotencyRecord<T = any> {
 }
 
 @Injectable()
-export class ApiIdempotencyService {
+export class ApiIdempotencyService implements OnModuleDestroy {
   private readonly logger = new Logger(ApiIdempotencyService.name);
   private redis: Redis | null = null;
   private memoryStore = new Map<string, IdempotencyRecord>();
@@ -195,6 +195,16 @@ export class ApiIdempotencyService {
     for (const [key, val] of this.memoryStore.entries()) {
       if (now - val.createdAt > defaultTtlMs) {
         this.memoryStore.delete(key);
+      }
+    }
+  }
+
+  async onModuleDestroy() {
+    if (this.redis) {
+      try {
+        await this.redis.quit();
+      } catch (e) {
+        this.redis.disconnect();
       }
     }
   }

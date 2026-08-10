@@ -1,9 +1,11 @@
 import { Injectable, OnModuleInit, OnModuleDestroy } from '@nestjs/common';
 import Redis from 'ioredis';
+import { StructuredLogger } from '@forgegate/logger';
 
 @Injectable()
 export class RedisService implements OnModuleInit, OnModuleDestroy {
   private client!: Redis;
+  private logger = new StructuredLogger('auth-redis-service');
 
   onModuleInit() {
     if (process.env.REDIS_URL) {
@@ -23,9 +25,14 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
-  onModuleDestroy() {
+  async onModuleDestroy() {
+    this.logger.log('Closing Redis connection in Auth RedisService...');
     if (this.client) {
-      this.client.disconnect();
+      try {
+        await this.client.quit();
+      } catch (e) {
+        this.client.disconnect();
+      }
     }
   }
 
@@ -36,9 +43,5 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
   async isTokenBlacklisted(tokenId: string): Promise<boolean> {
     const res = await this.client.get(`bl_${tokenId}`);
     return res === 'revoked';
-  }
-
-  getClient(): Redis {
-    return this.client;
   }
 }

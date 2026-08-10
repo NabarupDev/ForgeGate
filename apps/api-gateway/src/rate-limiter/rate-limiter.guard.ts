@@ -1,11 +1,13 @@
-import { Injectable, CanActivate, ExecutionContext, HttpException, HttpStatus } from '@nestjs/common';
+import { Injectable, CanActivate, ExecutionContext, HttpException, HttpStatus, OnModuleDestroy } from '@nestjs/common';
 import Redis from 'ioredis';
+import { StructuredLogger } from '@forgegate/logger';
 
 @Injectable()
-export class RedisRateLimiterGuard implements CanActivate {
+export class RedisRateLimiterGuard implements CanActivate, OnModuleDestroy {
   private redis: Redis;
   private windowSeconds = 60;
   private maxRequestsPerWindow = 100;
+  private logger = new StructuredLogger('rate-limiter-guard');
 
   constructor() {
     if (process.env.REDIS_URL) {
@@ -15,6 +17,17 @@ export class RedisRateLimiterGuard implements CanActivate {
       const port = parseInt(process.env.REDIS_PORT || '6379', 10);
       const password = process.env.REDIS_PASSWORD || undefined;
       this.redis = new Redis({ host, port, password });
+    }
+  }
+
+  async onModuleDestroy() {
+    this.logger.log('Closing Redis connection in RedisRateLimiterGuard...');
+    if (this.redis) {
+      try {
+        await this.redis.quit();
+      } catch (e) {
+        this.redis.disconnect();
+      }
     }
   }
 

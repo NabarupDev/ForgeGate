@@ -223,15 +223,35 @@ export class QueueService implements OnModuleInit, OnModuleDestroy {
   }
 
   async onModuleDestroy() {
+    this.structuredLogger.log('[Shutdown Stage 1/4] Stopping background recovery timer...');
     if (this.recoveryTimer) {
       clearInterval(this.recoveryTimer);
       this.recoveryTimer = null;
     }
-    await this.worker?.close();
-    await this.dlqWorker?.close();
-    await this.workflowQueue?.close();
-    await this.dlqQueue?.close();
-    await this.queueEvents?.close();
+
+    this.structuredLogger.log('[Shutdown Stage 2/4] Pausing worker polling & closing BullMQ workers...');
+    if (this.worker) {
+      try {
+        await this.worker.pause(true);
+        await this.worker.close();
+      } catch (e) {
+        // Handle transient teardown error
+      }
+    }
+    if (this.dlqWorker) {
+      try {
+        await this.dlqWorker.close();
+      } catch (e) {}
+    }
+
+    this.structuredLogger.log('[Shutdown Stage 3/4] Closing BullMQ queues & queue events...');
+    try {
+      await this.workflowQueue?.close();
+      await this.dlqQueue?.close();
+      await this.queueEvents?.close();
+    } catch (e) {}
+
+    this.structuredLogger.log('[Shutdown Stage 4/4] QueueService graceful shutdown complete.');
   }
 
   private async updateQueueGauges() {

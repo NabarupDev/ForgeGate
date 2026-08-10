@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, OnModuleDestroy } from '@nestjs/common';
 import { PrismaService } from '../prisma.service';
 import { StructuredLogger } from '@forgegate/logger';
 import { MetricsService } from '@forgegate/common';
@@ -42,7 +42,7 @@ function sanitizePayload(data: any): any {
 }
 
 @Injectable()
-export class WorkflowEngineService {
+export class WorkflowEngineService implements OnModuleDestroy {
   private structuredLogger = new StructuredLogger('workflow-engine');
   private metricsService = MetricsService.getInstance();
 
@@ -620,5 +620,15 @@ export class WorkflowEngineService {
     return this.prisma.workflowExecution.findUnique({
       where: { id: executionId },
     });
+  }
+
+  async onModuleDestroy() {
+    this.structuredLogger.log('Closing outbound rate limiter and concurrency limiter connections in WorkflowEngineService...');
+    if (this.outboundRateLimiter) {
+      await this.outboundRateLimiter.disconnect();
+    }
+    if (this.outboundConcurrencyLimiter) {
+      await this.outboundConcurrencyLimiter.disconnect();
+    }
   }
 }

@@ -5,15 +5,24 @@ dotenv.config();
 
 import { NestFactory } from '@nestjs/core';
 import { StructuredLogger } from '@forgegate/logger';
-import { AllExceptionsFilter } from '@forgegate/common';
+import { AllExceptionsFilter, applyHttpHardening } from '@forgegate/common';
 import { AppModule } from './app.module';
 
 async function bootstrap() {
   const logger = new StructuredLogger('Auth-Service');
   const app = await NestFactory.create(AppModule, { logger });
 
-  (app.getHttpAdapter().getInstance() as any)?.disable?.('x-powered-by');
+  app.enableShutdownHooks();
+  applyHttpHardening(app);
   app.useGlobalFilters(new AllExceptionsFilter());
+
+  process.on('SIGTERM', () => {
+    logger.log('SIGTERM signal received. Initiating Auth-Service graceful shutdown sequence...');
+  });
+
+  process.on('SIGINT', () => {
+    logger.log('SIGINT signal received. Initiating Auth-Service graceful shutdown sequence...');
+  });
 
   const port = process.env.AUTH_SERVICE_PORT || 3001;
   await app.listen(port);

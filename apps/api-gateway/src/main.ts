@@ -7,7 +7,7 @@ import { NestFactory } from '@nestjs/core';
 import { ValidationPipe } from '@nestjs/common';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { StructuredLogger } from '@forgegate/logger';
-import { TransformInterceptor, AllExceptionsFilter } from '@forgegate/common';
+import { TransformInterceptor, AllExceptionsFilter, applyHttpHardening } from '@forgegate/common';
 import { AppModule } from './app.module';
 
 async function bootstrap() {
@@ -16,9 +16,9 @@ async function bootstrap() {
 
   const apiPrefix = 'api/v1';
   app.setGlobalPrefix(apiPrefix);
-  app.enableCors();
   app.enableShutdownHooks();
-  (app.getHttpAdapter().getInstance() as any)?.disable?.('x-powered-by');
+
+  applyHttpHardening(app);
 
   app.useGlobalInterceptors(new TransformInterceptor());
   app.useGlobalFilters(new AllExceptionsFilter());
@@ -33,6 +33,14 @@ async function bootstrap() {
 
   const document = SwaggerModule.createDocument(app, swaggerConfig);
   SwaggerModule.setup(`${apiPrefix}/docs`, app, document);
+
+  process.on('SIGTERM', () => {
+    logger.log('SIGTERM signal received. Initiating API Gateway graceful shutdown sequence...');
+  });
+
+  process.on('SIGINT', () => {
+    logger.log('SIGINT signal received. Initiating API Gateway graceful shutdown sequence...');
+  });
 
   const port = process.env.PORT || 3000;
   await app.listen(port);

@@ -53,9 +53,16 @@ export class NotificationWorker implements OnModuleInit, OnModuleDestroy {
     });
   }
 
-  onModuleDestroy() {
+  async onModuleDestroy() {
+    this.logger.log('[Shutdown Stage 1/2] Pausing and closing Notification BullMQ worker...');
     if (this.worker) {
-      this.worker.close();
+      try {
+        await this.worker.pause(true);
+        await this.worker.close();
+      } catch (e) {
+        // Teardown fallback
+      }
     }
+    this.logger.log('[Shutdown Stage 2/2] NotificationWorker graceful shutdown complete.');
   }
 }

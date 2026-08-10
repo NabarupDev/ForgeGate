@@ -1,12 +1,14 @@
-import { Controller, Get } from '@nestjs/common';
+import { Controller, Get, OnModuleDestroy } from '@nestjs/common';
 import { ApiTags, ApiOperation } from '@nestjs/swagger';
 import Redis from 'ioredis';
 import axios from 'axios';
+import { StructuredLogger } from '@forgegate/logger';
 
 @ApiTags('System Health')
 @Controller('health')
-export class HealthController {
+export class HealthController implements OnModuleDestroy {
   private redis: Redis;
+  private logger = new StructuredLogger('health-controller');
 
   constructor() {
     if (process.env.REDIS_URL) {
@@ -16,6 +18,17 @@ export class HealthController {
       const port = parseInt(process.env.REDIS_PORT || '6379', 10);
       const password = process.env.REDIS_PASSWORD || undefined;
       this.redis = new Redis({ host, port, password, maxRetriesPerRequest: 1 });
+    }
+  }
+
+  async onModuleDestroy() {
+    this.logger.log('Closing Redis connection in HealthController...');
+    if (this.redis) {
+      try {
+        await this.redis.quit();
+      } catch (e) {
+        this.redis.disconnect();
+      }
     }
   }
 
@@ -53,21 +66,29 @@ export class HealthController {
       timestamp,
       dependencies: {
         redis: { status: redisStatus },
-      },
-      services: {
-        authService: authHealth,
-        workflowService: workflowHealth,
-        notificationService: notificationHealth,
+        services: {
+          authService: authHealth,
+          workflowService: workflowHealth,
+          notificationService: notificationHealth,
+        },
       },
     };
   }
 
-  private async checkServiceHealth(baseUrl: string, endpoint: string) {
+  private async checkServiceHealth(baseUrl: string, path: string) {
     try {
-      const res = await axios.get(`${baseUrl}${endpoint}`, { timeout: 3000 });
-      return { status: 'up', statusCode: res.status, details: res.data };
+      const response = await axios.get(`${baseUrl}${path}`, { timeout: 2000 });
+      return {
+        status: response.status === 200 ? 'up' : 'down',
+        statusCode: response.status,
+        url: `${baseUrl}${path}`,
+      };
     } catch (err: any) {
-      return { status: 'down', error: err.message };
+      return {
+        status: 'down',
+        error: err.message,
+        url: `${baseUrl}${path}`,
+      };
     }
   }
 }
