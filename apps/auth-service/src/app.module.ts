@@ -1,4 +1,4 @@
-import { Module, Controller, Post, Body, Get, Query, Headers, UseGuards, Req } from '@nestjs/common';
+import { Module, Controller, Post, Body, Get, Query, Headers } from '@nestjs/common';
 import { JwtModule } from '@nestjs/jwt';
 import { ConfigModule } from '@nestjs/config';
 import { PrismaService } from './prisma.service';
@@ -47,6 +47,36 @@ export class AuthController {
     @Query('cursor') cursor?: string,
   ) {
     return this.authService.getTenants({ limit, skip, cursor });
+  }
+
+  @Get('audit-logs')
+  async getAuditLogs(
+    @Query('tenantId') tenantId?: string,
+    @Query('limit') limit?: string,
+    @Query('skip') skip?: string,
+    @Query('cursor') cursor?: string,
+  ) {
+    return this.authService.getAuditLogs(tenantId, { limit, skip, cursor });
+  }
+
+  @Post('users/role')
+  async changeUserRole(@Body() body: { targetUserId: string; roleName: string; actorUserId?: string; tenantId?: string }) {
+    return this.authService.changeUserRole(body.targetUserId, body.roleName, body.actorUserId, body.tenantId);
+  }
+
+  @Post('roles/permissions')
+  async updateRolePermissions(@Body() body: { roleName: string; permissions: string[]; actorUserId?: string; tenantId?: string }) {
+    return this.authService.updateRolePermissions(body.roleName, body.permissions, body.actorUserId, body.tenantId);
+  }
+
+  @Post('tenants/update')
+  async updateTenant(@Body() body: { tenantId: string; updates: { name?: string; slug?: string; isActive?: boolean }; actorUserId?: string }) {
+    return this.authService.updateTenant(body.tenantId, body.updates, body.actorUserId);
+  }
+
+  @Post('apikeys')
+  async createApiKey(@Body() body: { tenantId: string; userId: string; name: string }) {
+    return this.authService.createApiKey(body.tenantId, body.userId, body.name);
   }
 
   @Get('health')

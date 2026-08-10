@@ -42,6 +42,16 @@ export class WorkflowController {
     return this.workflowService.updateWorkflow(id, dto, user);
   }
 
+  @Get('audit-logs')
+  async getAuditLogs(
+    @CurrentUser() user: UserContext,
+    @Query('limit') limit?: string,
+    @Query('skip') skip?: string,
+    @Query('cursor') cursor?: string,
+  ) {
+    return this.workflowService.getAuditLogs(user, { limit, skip, cursor });
+  }
+
   @Delete(':id')
   async deleteWorkflow(@Param('id') id: string, @CurrentUser() user: UserContext) {
     return this.workflowService.deleteWorkflow(id, user);

@@ -4,7 +4,9 @@
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "scripts": {
-    "build": "tsc"
+    "build": "tsc",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint \"src/**/*.ts\""
   },
   "dependencies": {
     "@nestjs/common": "^10.4.22",

@@ -1,0 +1,12 @@
+# Gitleaks configuration for ForgeGate
+# https://github.com/gitleaks/gitleaks
+
+title = "ForgeGate Gitleaks Config"
+
+[allowlist]
+  description = "Allow test fixtures and dummy placeholder values"
+  paths = [
+    '''(^|\/)test\/.*\.spec\.ts$''',
+    '''(^|\/)test\/.*\.test\.ts$''',
+    '''(^|\/)__tests__\/.*\.ts$''',
+  ]

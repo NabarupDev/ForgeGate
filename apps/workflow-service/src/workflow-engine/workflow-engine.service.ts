@@ -86,6 +86,18 @@ export class WorkflowEngineService implements OnModuleDestroy {
     // Metric: Workflow execution started
     this.metricsService.workflowExecutionsTotal.inc({ status: 'started' });
 
+    if (this.prisma.auditLog) {
+      await this.prisma.auditLog.create({
+        data: {
+          tenantId,
+          userId: execution.workflow?.createdById || null,
+          action: 'workflow.execution_started',
+          correlationId: effectiveCorrelationId,
+          metadata: { executionId, workflowId: execution.workflowId, attemptCount },
+        },
+      });
+    }
+
     // State transition to 'running' or 'retrying' using atomic claim
     const statusState = attemptCount > 1 ? 'retrying' : 'running';
     let claimCount = 1;

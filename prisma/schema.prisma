@@ -239,14 +239,15 @@ model StepExecution {
 // ----------------------------------------------------
 
 model AuditLog {
-  id        String   @id @default(uuid())
-  tenantId  String?  @map("tenant_id")
-  userId    String?  @map("user_id")
-  action    String
-  ipAddress String?  @map("ip_address")
-  userAgent String?  @map("user_agent")
-  metadata  Json?
-  createdAt DateTime @default(now()) @map("created_at")
+  id            String   @id @default(uuid())
+  tenantId      String?  @map("tenant_id")
+  userId        String?  @map("user_id")
+  action        String
+  correlationId String?  @map("correlation_id")
+  ipAddress     String?  @map("ip_address")
+  userAgent     String?  @map("user_agent")
+  metadata      Json?
+  createdAt     DateTime @default(now()) @map("created_at")
 
   @@index([tenantId, createdAt])
   @@index([userId, createdAt])

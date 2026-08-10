@@ -1,0 +1,82 @@
+name: ForgeGate Security Audit
+
+on:
+  push:
+    branches: [ main, master, dev ]
+  pull_request:
+    branches: [ main, master, dev ]
+  schedule:
+    - cron: '0 4 * * 1' # Weekly security audit every Monday at 04:00 UTC
+
+jobs:
+  dependency-audit:
+    name: Dependency Vulnerability Audit
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 11
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: 'pnpm'
+
+      - name: Install Dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Run Dependency Audit
+        run: pnpm run audit
+
+  secret-scanning:
+    name: Secret & Credential Scanning
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Run Gitleaks Secret Scanner
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITLEAKS_CONFIG: .gitleaks.toml
+
+  docker-security-scan:
+    name: Container Image Vulnerability Audit
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Build Root Docker Image
+        run: docker build -t forgegate-app:ci .
+
+      - name: Build API Gateway Docker Image
+        run: docker build -f infra/docker/Dockerfile.api-gateway -t forgegate-api-gateway:ci .
+
+      - name: Run Trivy Scan on Root App Image
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: 'forgegate-app:ci'
+          format: 'table'
+          exit-code: '0' # Reports vulnerabilities clearly in step output
+          ignore-unfixed: true
+          vuln-type: 'os,library'
+          severity: 'HIGH,CRITICAL'
+
+      - name: Run Trivy Scan on API Gateway Image
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: 'forgegate-api-gateway:ci'
+          format: 'table'
+          exit-code: '0'
+          ignore-unfixed: true
+          vuln-type: 'os,library'
+          severity: 'HIGH,CRITICAL'

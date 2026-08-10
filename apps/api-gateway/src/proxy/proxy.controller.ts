@@ -1,5 +1,5 @@
-import { Controller, All, Req, Res, Body, Query, Headers, Param, RequestMethod } from '@nestjs/common';
-import { Request, Response } from 'express';
+import { Controller, All, Req, Body, Query, Headers } from '@nestjs/common';
+import { Request } from 'express';
 import { ApiTags, ApiOperation } from '@nestjs/swagger';
 import { ProxyService } from './proxy.service';
 import { Method } from 'axios';

@@ -4,6 +4,8 @@
   "private": true,
   "scripts": {
     "build": "tsc",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint \"src/**/*.ts\"",
     "start:dev": "ts-node src/main.ts"
   },
   "dependencies": {

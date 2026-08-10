@@ -5,7 +5,9 @@
   "description": "ForgeGate - Distributed Backend Workflow Platform",
   "scripts": {
     "build": "pnpm --filter \"./packages/*\" run build && pnpm --filter \"./apps/*\" run build",
-    "lint": "pnpm -r run lint",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint \"{apps,packages,prisma}/**/*.ts\"",
+    "audit": "pnpm audit --audit-level high",
     "test": "jest",
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate dev",
@@ -18,14 +20,17 @@
     "@prisma/client": "^5.22.0",
     "argon2": "^0.41.1",
     "dotenv": "^16.4.7",
+    "prisma": "^5.22.0",
     "reflect-metadata": "^0.2.2",
     "rxjs": "^7.8.2"
   },
   "devDependencies": {
     "@types/jest": "^30.0.0",
     "@types/node": "^20.19.43",
+    "@typescript-eslint/eslint-plugin": "^7.18.0",
+    "@typescript-eslint/parser": "^7.18.0",
+    "eslint": "^8.57.1",
     "jest": "^30.4.2",
-    "prisma": "^5.22.0",
     "ts-jest": "^29.4.12",
     "ts-node": "^10.9.2",
     "typescript": "^5.9.3"

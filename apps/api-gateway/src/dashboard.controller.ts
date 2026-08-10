@@ -258,7 +258,7 @@ export class DashboardController {
 
               const actionBtn = isReplayed
                 ? '<button class="btn btn-secondary" disabled style="opacity:0.5;cursor:not-allowed;">Replayed</button>'
-                : '<button class="btn" onclick="replayDlq(\'' + j.id + '\')">Replay Job</button>';
+                : '<button class="btn" onclick="replayDlq(' + j.id + ')">Replay Job</button>';
 
               return '<tr>' +
                 '<td><strong>' + j.id + '</strong><br/><span style="color:var(--text-muted);font-size:0.75rem;">' + execId + '</span></td>' +

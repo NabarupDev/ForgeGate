@@ -2,11 +2,37 @@ import { Injectable, NotFoundException, BadRequestException, ForbiddenException 
 import { PrismaService } from '../prisma.service';
 import { CreateWorkflowDto } from './dto/create-workflow.dto';
 import { UserContext, AuthorizationPolicy } from '@forgegate/auth';
-import { parsePaginationParams, buildPaginatedResult, PaginationQuery, PaginatedResult } from '@forgegate/common';
+import { parsePaginationParams, buildPaginatedResult, PaginationQuery, PaginatedResult, sanitizeAuditMetadata } from '@forgegate/common';
 
 @Injectable()
 export class WorkflowService {
   constructor(private readonly prisma: PrismaService) {}
+
+  async recordAuditLog(params: {
+    tenantId?: string | null;
+    userId?: string | null;
+    action: string;
+    correlationId?: string | null;
+    ipAddress?: string | null;
+    userAgent?: string | null;
+    metadata?: Record<string, any> | null;
+  }) {
+    if (!this.prisma || !this.prisma.auditLog) {
+      return null;
+    }
+    const sanitized = sanitizeAuditMetadata(params.metadata);
+    return this.prisma.auditLog.create({
+      data: {
+        tenantId: params.tenantId || null,
+        userId: params.userId || null,
+        action: params.action,
+        correlationId: params.correlationId || null,
+        ipAddress: params.ipAddress || null,
+        userAgent: params.userAgent || null,
+        metadata: sanitized as any,
+      },
+    });
+  }
 
   async createWorkflow(dto: CreateWorkflowDto, user?: UserContext) {
     if (user && !AuthorizationPolicy.can(user, 'workflow:create')) {
@@ -25,7 +51,7 @@ export class WorkflowService {
       throw new BadRequestException('name, tenantId, and createdById are required');
     }
 
-    return this.prisma.workflow.create({
+    const created = await this.prisma.workflow.create({
       data: {
         name,
         description,
@@ -43,6 +69,15 @@ export class WorkflowService {
       },
       include: { steps: true },
     });
+
+    await this.recordAuditLog({
+      tenantId: effectiveTenantId,
+      userId: effectiveCreatedById,
+      action: 'workflow.created',
+      metadata: { workflowId: created.id, name: created.name, triggerType: created.triggerType },
+    });
+
+    return created;
   }
 
   async getWorkflows(
@@ -120,7 +155,7 @@ export class WorkflowService {
       throw new ForbiddenException('You do not have permission to modify this workflow');
     }
 
-    return this.prisma.workflow.update({
+    const updated = await this.prisma.workflow.update({
       where: { id: wf.id },
       data: {
         name: dto.name ?? wf.name,
@@ -129,6 +164,15 @@ export class WorkflowService {
       },
       include: { steps: true },
     });
+
+    await this.recordAuditLog({
+      tenantId: wf.tenantId,
+      userId: user?.id || wf.createdById,
+      action: 'workflow.updated',
+      metadata: { workflowId: wf.id, updatedFields: dto },
+    });
+
+    return updated;
   }
 
   async deleteWorkflow(id: string, user?: UserContext) {
@@ -139,6 +183,42 @@ export class WorkflowService {
     }
 
     await this.prisma.workflow.delete({ where: { id: wf.id } });
+
+    await this.recordAuditLog({
+      tenantId: wf.tenantId,
+      userId: user?.id || wf.createdById,
+      action: 'workflow.deleted',
+      metadata: { workflowId: id },
+    });
+
     return { status: 'deleted', id };
+  }
+
+  async getAuditLogs(userCtx?: UserContext, query?: PaginationQuery): Promise<PaginatedResult<any>> {
+    if (userCtx && !AuthorizationPolicy.can(userCtx, 'workflow:read')) {
+      throw new ForbiddenException(`Role '${userCtx.role}' is not authorized to read audit logs`);
+    }
+
+    const tenantId = userCtx?.tenantId;
+    const { limit, skip, cursor } = parsePaginationParams(query);
+    const where: any = tenantId ? { tenantId } : {};
+
+    const totalCount = await this.prisma.auditLog.count({ where });
+
+    const queryArgs: any = {
+      where,
+      take: limit + 1,
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+    };
+
+    if (cursor) {
+      queryArgs.cursor = { id: cursor };
+      queryArgs.skip = 1;
+    } else if (skip) {
+      queryArgs.skip = skip;
+    }
+
+    const items = await this.prisma.auditLog.findMany(queryArgs);
+    return buildPaginatedResult(items, limit, (item) => item.id, totalCount, skip);
   }
 }

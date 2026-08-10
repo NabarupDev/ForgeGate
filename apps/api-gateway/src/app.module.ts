@@ -1,4 +1,4 @@
-import { Module, Get, Controller, Res, UseGuards } from '@nestjs/common';
+import { Module, Get, Controller, Res } from '@nestjs/common';
 import { Response } from 'express';
 import { ApiTags, ApiOperation } from '@nestjs/swagger';
 import { MetricsService } from './metrics.service';

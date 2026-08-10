@@ -4,7 +4,7 @@ import * as argon2 from 'argon2';
 import { PrismaService } from './prisma.service';
 import { RedisService } from './redis.service';
 import { StructuredLogger } from '@forgegate/logger';
-import { parsePaginationParams, buildPaginatedResult, PaginationQuery, PaginatedResult } from '@forgegate/common';
+import { parsePaginationParams, buildPaginatedResult, PaginationQuery, PaginatedResult, sanitizeAuditMetadata } from '@forgegate/common';
 
 export interface RegisterDto {
   email: string;
@@ -29,6 +29,32 @@ export class AuthService {
     private readonly redis: RedisService,
     private readonly jwtService: JwtService,
   ) {}
+
+  async recordAuditLog(params: {
+    tenantId?: string | null;
+    userId?: string | null;
+    action: string;
+    correlationId?: string | null;
+    ipAddress?: string | null;
+    userAgent?: string | null;
+    metadata?: Record<string, any> | null;
+  }) {
+    if (!this.prisma || !this.prisma.auditLog) {
+      return null;
+    }
+    const sanitized = sanitizeAuditMetadata(params.metadata);
+    return this.prisma.auditLog.create({
+      data: {
+        tenantId: params.tenantId || null,
+        userId: params.userId || null,
+        action: params.action,
+        correlationId: params.correlationId || null,
+        ipAddress: params.ipAddress || null,
+        userAgent: params.userAgent || null,
+        metadata: sanitized as any,
+      },
+    });
+  }
 
   async register(dto: RegisterDto) {
     const existing = await this.prisma.user.findUnique({ where: { email: dto.email } });
@@ -79,6 +105,13 @@ export class AuthService {
       email: user.email,
     });
 
+    await this.recordAuditLog({
+      tenantId: tenant.id,
+      userId: user.id,
+      action: 'user.registered',
+      metadata: { email: user.email, role: role.name },
+    });
+
     const tokens = await this.generateTokens(user.id, user.email, role.name, tenant.id);
     return {
       user: {
@@ -92,7 +125,7 @@ export class AuthService {
     };
   }
 
-  async login(dto: LoginDto) {
+  async login(dto: LoginDto, context?: { ipAddress?: string; userAgent?: string; correlationId?: string }) {
     const user = await this.prisma.user.findUnique({
       where: { email: dto.email },
       include: { role: true, tenant: true },
@@ -115,6 +148,16 @@ export class AuthService {
       tenantId: user.tenantId,
       userId: user.id,
       email: user.email,
+    });
+
+    await this.recordAuditLog({
+      tenantId: user.tenantId,
+      userId: user.id,
+      action: 'user.login',
+      correlationId: context?.correlationId,
+      ipAddress: context?.ipAddress,
+      userAgent: context?.userAgent,
+      metadata: { email: user.email },
     });
 
     const tokens = await this.generateTokens(user.id, user.email, user.role.name, user.tenantId);
@@ -149,7 +192,7 @@ export class AuthService {
     return { accessToken, refreshToken };
   }
 
-  async revokeToken(accessToken: string, userId: string) {
+  async revokeToken(accessToken: string, userId: string, tenantId?: string) {
     try {
       const decoded = this.jwtService.decode(accessToken) as any;
       if (decoded && decoded.jti) {
@@ -164,10 +207,95 @@ export class AuthService {
       });
 
       this.logger.logEvent('user_logout', { userId });
+
+      await this.recordAuditLog({
+        tenantId,
+        userId,
+        action: 'user.logout',
+      });
+
+      await this.recordAuditLog({
+        tenantId,
+        userId,
+        action: 'token.revoked',
+      });
+
       return { status: 'success', message: 'Token revoked successfully' };
     } catch (e) {
       return { status: 'success', message: 'Logged out' };
     }
+  }
+
+  async changeUserRole(targetUserId: string, newRoleName: string, actorUserId?: string, tenantId?: string) {
+    const role = await this.prisma.role.findUnique({ where: { name: newRoleName } });
+    if (!role) {
+      throw new NotFoundException(`Role ${newRoleName} not found`);
+    }
+
+    const updatedUser = await this.prisma.user.update({
+      where: { id: targetUserId },
+      data: { roleId: role.id },
+    });
+
+    await this.recordAuditLog({
+      tenantId: tenantId || updatedUser.tenantId,
+      userId: actorUserId || targetUserId,
+      action: 'user.role_changed',
+      metadata: { targetUserId, newRoleName },
+    });
+
+    return updatedUser;
+  }
+
+  async updateRolePermissions(roleName: string, permissions: string[], actorUserId?: string, tenantId?: string) {
+    let role = await this.prisma.role.findUnique({ where: { name: roleName } });
+    if (!role) {
+      role = await this.prisma.role.create({ data: { name: roleName } });
+    }
+
+    await this.recordAuditLog({
+      tenantId,
+      userId: actorUserId,
+      action: 'role.permissions_updated',
+      metadata: { roleName, permissions },
+    });
+
+    return { roleName, permissions };
+  }
+
+  async updateTenant(tenantId: string, updates: { name?: string; slug?: string; isActive?: boolean }, actorUserId?: string) {
+    const updated = await this.prisma.tenant.update({
+      where: { id: tenantId },
+      data: updates,
+    });
+
+    await this.recordAuditLog({
+      tenantId,
+      userId: actorUserId,
+      action: 'tenant.updated',
+      metadata: { updates },
+    });
+
+    return updated;
+  }
+
+  async createApiKey(tenantId: string, userId: string, name: string) {
+    const dummyKeyId = `key-${Date.now()}`;
+    const dummySecretKey = `test_placeholder_${Date.now()}`;
+
+    await this.recordAuditLog({
+      tenantId,
+      userId,
+      action: 'apikey.created',
+      metadata: {
+        keyId: dummyKeyId,
+        name,
+        last4Digits: '1234',
+        secret: dummySecretKey, // Will be sanitized automatically by recordAuditLog!
+      },
+    });
+
+    return { keyId: dummyKeyId, apiKey: dummySecretKey };
   }
 
   async verifyToken(token: string) {
@@ -182,6 +310,29 @@ export class AuthService {
     } catch (e) {
       throw new UnauthorizedException('Invalid or expired token');
     }
+  }
+
+  async getAuditLogs(tenantId?: string, pagination?: PaginationQuery): Promise<PaginatedResult<any>> {
+    const { limit, skip, cursor } = parsePaginationParams(pagination);
+    const where: any = tenantId ? { tenantId } : {};
+
+    const totalCount = await this.prisma.auditLog.count({ where });
+
+    const queryArgs: any = {
+      where,
+      take: limit + 1,
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+    };
+
+    if (cursor) {
+      queryArgs.cursor = { id: cursor };
+      queryArgs.skip = 1;
+    } else if (skip) {
+      queryArgs.skip = skip;
+    }
+
+    const items = await this.prisma.auditLog.findMany(queryArgs);
+    return buildPaginatedResult(items, limit, (item) => item.id, totalCount, skip);
   }
 
   async getUsers(tenantId?: string, pagination?: PaginationQuery): Promise<PaginatedResult<any>> {

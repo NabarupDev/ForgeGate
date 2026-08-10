@@ -1,31 +1,36 @@
 # Build Stage
-FROM node:20-alpine AS builder
+FROM node:22-alpine AS builder
 
 WORKDIR /app
 
-COPY package*.json ./
-COPY prisma ./prisma/
+RUN corepack enable && corepack prepare pnpm@11.18.0 --activate
 
-RUN npm ci
+COPY pnpm-lock.yaml pnpm-workspace.yaml package.json tsconfig.json .eslintrc.json nest-cli.json ./
+COPY apps ./apps
+COPY packages ./packages
+COPY prisma ./prisma
 
-COPY . .
-
-RUN npx prisma generate
-RUN npm run build
+RUN pnpm install --frozen-lockfile
+RUN pnpm run prisma:generate
+RUN pnpm run build
 
 # Production Stage
-FROM node:20-alpine AS production
+FROM node:22-alpine AS production
 
 WORKDIR /app
 
-COPY package*.json ./
-COPY prisma ./prisma/
+RUN corepack enable && corepack prepare pnpm@11.18.0 --activate
 
-RUN npm ci --only=production
+COPY pnpm-lock.yaml pnpm-workspace.yaml package.json tsconfig.json .eslintrc.json nest-cli.json ./
+COPY apps ./apps
+COPY packages ./packages
+COPY prisma ./prisma
 
-COPY --from=builder /app/dist ./dist
-COPY --from=builder /app/node_modules/.prisma ./node_modules/.prisma
+RUN pnpm install --frozen-lockfile --prod
+
+RUN pnpm run prisma:generate
+COPY --from=builder /app/apps/api-gateway/dist ./apps/api-gateway/dist
 
 EXPOSE 3000
 
-CMD ["node", "dist/main"]
+CMD ["node", "apps/api-gateway/dist/main.js"]

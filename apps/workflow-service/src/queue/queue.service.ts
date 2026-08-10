@@ -1,9 +1,11 @@
-import { Injectable, OnModuleInit, OnModuleDestroy, ForbiddenException, ConflictException } from '@nestjs/common';
+import { Injectable, OnModuleInit, OnModuleDestroy, ForbiddenException } from '@nestjs/common';
 import { Queue, Worker, QueueEvents, Job } from 'bullmq';
 import { StructuredLogger } from '@forgegate/logger';
 import { MetricsService, parsePaginationParams, buildPaginatedResult, PaginationQuery, PaginatedResult } from '@forgegate/common';
 import { WorkflowEngineService } from '../workflow-engine/workflow-engine.service';
 import { calculateRetryDecision } from '../workflow-engine/http-retry-scheduler';
+
+import { PrismaService } from '../prisma.service';
 
 export function sanitizePayloadString(str: string): string {
   if (!str) return str;
@@ -71,7 +73,10 @@ export class QueueService implements OnModuleInit, OnModuleDestroy {
 
   private recoveryTimer: NodeJS.Timeout | null = null;
 
-  constructor(private readonly engineService: WorkflowEngineService) {}
+  constructor(
+    private readonly engineService: WorkflowEngineService,
+    private readonly prisma?: PrismaService,
+  ) {}
 
   async onModuleInit() {
     const redisHost = process.env.REDIS_HOST || 'localhost';
@@ -159,7 +164,7 @@ export class QueueService implements OnModuleInit, OnModuleDestroy {
         );
       } else {
         let workflowId = 'unknown';
-        let failedStepId = (err as any).stepId || 'unknown';
+        const failedStepId = (err as any).stepId || 'unknown';
         const category = (err as any).category || 'PERMANENT_FAILURE';
         const httpStatus = (err as any).statusCode || (err as any).status || null;
 
@@ -388,6 +393,18 @@ export class QueueService implements OnModuleInit, OnModuleDestroy {
     // 3. Preserve audit trail in WorkflowEngineService
     if (typeof this.engineService.logReplayEvent === 'function') {
       await this.engineService.logReplayEvent(executionId, tenantId, operatorId, job.id);
+    }
+
+    if (this.prisma && this.prisma.auditLog) {
+      await this.prisma.auditLog.create({
+        data: {
+          tenantId,
+          userId: operatorId,
+          action: 'dlq.replayed',
+          correlationId: correlationId || null,
+          metadata: { dlqJobId: jobId, executionId, replayedBy: operatorId },
+        },
+      });
     }
 
     // 4. Enqueue execution with fresh attempt counter (preserving step execution history)
