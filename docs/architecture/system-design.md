@@ -38,7 +38,7 @@ ForgeGate is an open-source distributed microservices workflow execution engine 
           │                     ┌────────────────────────────────────────┐
           │                     │ Queue & Storage Layer                  │
           │                     │ ├─ BullMQ Queues (Redis)               │
-          │                     │ ├─ PostgreSQL (auth/workflow schemas)  │
+          │                     │ ├─ PostgreSQL (auth/workflow/audit)    │
           │                     │ └─ Dead-Letter Queue (workflow-dlq)    │
           │                     └─────────────────┬──────────────────────┘
           │                                       │
@@ -56,7 +56,7 @@ ForgeGate is an open-source distributed microservices workflow execution engine 
 
 | Microservice | Port | Domain Responsibility | Database Schema | Primary Dependencies |
 |---|---|---|---|---|
-| **API Gateway** | `3000` | Ingress entrypoint, reverse HTTP proxying, correlation ID generation, inbound rate limiting, OpenAPI docs | N/A | Redis |
+| **API Gateway** | `3000` | Ingress entrypoint, reverse HTTP proxying, correlation ID generation, inbound rate limiting, Prometheus metrics (`/api/v1/metrics`), dashboard UI (`/api/v1/dashboard`) | N/A | Redis |
 | **Auth Service** | `3001` | User registration, authentication strategies, multi-tenant RBAC, JWT issuance, token revocation | `auth` | PostgreSQL, Redis |
 | **Workflow Service** | `3002` | Workflow definition management, execution triggering, state-machine orchestration, background workers, DLQ & replay APIs | `workflow` | PostgreSQL, Redis, BullMQ, Axios |
 | **Notification Service** | `3003` | Asynchronous notification handling, email dispatches, event consumption | N/A | BullMQ / Redis |
@@ -78,21 +78,21 @@ sequenceDiagram
     participant Worker as Engine Worker
     participant Provider as Downstream HTTP Provider
 
-    Client->>Gateway: POST /api/v1/executions/trigger (x-correlation-id)
+    Client->>Gateway: POST /api/v1/workflows/:id/trigger (x-correlation-id)
     Gateway->>Gateway: Enforce inbound sliding-window rate limit
     Gateway->>WorkflowAPI: Forward request with correlationId & tenantContext
-    WorkflowAPI->>DB: Create WorkflowExecution (status: PENDING)
+    WorkflowAPI->>DB: Create WorkflowExecution (status: pending)
     WorkflowAPI->>Queue: Enqueue job into workflow-executions queue
     WorkflowAPI-->>Client: 201 Created (executionId, status: pending)
 
     Queue->>Worker: Worker picks up execution job
-    Worker->>DB: Atomic claim StepExecution (status: RUNNING)
+    Worker->>DB: Atomic claim StepExecution (status: RUNNING via updateMany)
     Worker->>Worker: Check outbound rate limit & concurrency quota
 
     alt Outbound Quota Available
         Worker->>Provider: HTTP POST/GET (x-correlation-id, Idempotency-Key)
         Provider-->>Worker: HTTP 200 OK (Response Payload)
-        Worker->>DB: Update StepExecution (SUCCEEDED) & WorkflowExecution (COMPLETED)
+        Worker->>DB: Update StepExecution (SUCCEEDED) & WorkflowExecution (completed)
     else Outbound Limit Exceeded / Deferral
         Worker->>Queue: Defer job with delayMs
         Worker->>DB: Update StepExecution (status: RETRYING)

@@ -21,8 +21,9 @@ flowchart TD
 
     subgraph Ingress & Observability Layer
         Gateway --> RateLimiter[Redis Inbound Sliding-Window Rate Limiter]
-        Gateway --> Dashboard[Admin Monitoring Dashboard]
-        Gateway --> Metrics[Prometheus Metrics Service]
+        Gateway --> Dashboard[Admin Monitoring Dashboard - /api/v1/dashboard]
+        Gateway --> Metrics[Prometheus Metrics Service - /api/v1/metrics]
+        Gateway --> Health[Cluster Health Aggregator - /api/v1/health]
     end
 
     subgraph Microservices Workspace
@@ -43,7 +44,7 @@ flowchart TD
         Queue --> Worker[Workflow Engine Worker]
         Worker --> RetryEngine[Exponential Backoff & Retry Scheduler]
         RetryEngine --> DLQ[Dead Letter Queue - workflow-dlq]
-        Worker --> StaleRecovery[Heartbeat Recovery Monitor]
+        Worker --> StaleRecovery[Heartbeat Lease Recovery Monitor]
     end
 ```
 
@@ -67,7 +68,10 @@ ForgeGate/
 │   ├── architecture/
 │   │   └── system-design.md  # Detailed architecture, sequence diagrams & state machines
 │   ├── adr-001-service-data-ownership.md # Multi-schema database architecture ADR
-│   └── IDEMPOTENCY.md        # Downstream idempotency model & header configuration
+│   ├── IDEMPOTENCY.md        # Downstream idempotency model & header configuration
+│   ├── SECURITY.md           # Local security audit workflow & CI controls
+│   └── api/
+│       └── openapi-spec.json # OpenAPI 3.0 API specification
 ├── infra/
 │   ├── docker/               # Docker Compose container orchestration
 │   ├── nginx/                # Reverse proxy configuration
@@ -116,12 +120,20 @@ ForgeGate/
 
 ## Active Service Endpoints
 
-| Endpoint | Description |
-| :--- | :--- |
-| `http://localhost:3000/api/v1/dashboard` | Interactive Admin Monitoring Console |
-| `http://localhost:3000/api/v1/docs` | Swagger OpenAPI Documentation UI |
-| `http://localhost:3000/api/v1/health` | Microservice Cluster Health Aggregator |
-| `http://localhost:3000/api/v1/metrics` | Prometheus Metrics Endpoint |
+| Endpoint | Method | Access / Guard | Description |
+| :--- | :---: | :--- | :--- |
+| `http://localhost:3000/api/v1/dashboard` | `GET` | Public / Admin | Interactive Admin Monitoring Console |
+| `http://localhost:3000/api/v1/docs` | `GET` | Public | Swagger OpenAPI Documentation UI |
+| `http://localhost:3000/api/v1/health` | `GET` | Public | Microservice Cluster Health Aggregator |
+| `http://localhost:3000/api/v1/metrics` | `GET` | Public | Prometheus Metrics Endpoint |
+| `http://localhost:3000/api/v1/auth/register` | `POST` | Public | Register new user & tenant context |
+| `http://localhost:3000/api/v1/auth/login` | `POST` | Public | Authenticate user & issue JWT tokens |
+| `http://localhost:3000/api/v1/workflows` | `POST` | `JwtAuthGuard` | Create a new workflow definition |
+| `http://localhost:3000/api/v1/workflows` | `GET` | `JwtAuthGuard` | List workflow definitions for tenant |
+| `http://localhost:3000/api/v1/workflows/:id/trigger` | `POST` | `JwtAuthGuard` | Trigger execution of a workflow |
+| `http://localhost:3000/api/v1/workflows/executions` | `GET` | `JwtAuthGuard` | Query workflow executions |
+| `http://localhost:3000/api/v1/workflows/dlq/jobs` | `GET` | `admin`, `operator` | Inspect jobs in Dead-Letter Queue |
+| `http://localhost:3000/api/v1/workflows/dlq/:jobId/retry` | `POST` | `admin`, `operator` | Replay an exhausted job from DLQ |
 
 ---
 
@@ -129,11 +141,11 @@ ForgeGate/
 
 | Component | Specification |
 | :--- | :--- |
-| **Language & Runtime** | TypeScript, Node.js v20+ |
-| **Monorepo Architecture** | pnpm Workspaces |
+| **Language & Runtime** | TypeScript, Node.js v22+ (LTS) |
+| **Monorepo Architecture** | pnpm Workspaces (v11+) |
 | **Backend Framework** | NestJS v10 |
-| **Database & ORM** | PostgreSQL 16 (Multi-Schema), Prisma ORM |
-| **Caching & Queues** | Redis, BullMQ, ioredis |
+| **Database & ORM** | PostgreSQL 16 (Multi-Schema: `auth`, `workflow`, `audit`, `billing`), Prisma ORM |
+| **Caching & Queues** | Redis 7, BullMQ, ioredis |
 | **Logging & Metrics** | Winston (Structured JSON), Prometheus (`prom-client`) |
 | **Containerization & CI** | Docker, Docker Compose, GitHub Actions |
 
@@ -142,9 +154,9 @@ ForgeGate/
 ## Getting Started
 
 ### Prerequisites
-- Node.js v20.0.0 or higher
-- pnpm v9.0.0 or higher
-- PostgreSQL & Redis instances
+- **Node.js v22.13.0 or higher**
+- **pnpm v11.18.0 or higher**
+- PostgreSQL & Redis instances (or Docker Compose)
 
 ### Installation & Execution
 
@@ -161,7 +173,7 @@ ForgeGate/
    ```
    > [!IMPORTANT]
    > Do **not** commit your active `.env` file to version control. Set custom secrets (`JWT_ACCESS_SECRET`, `JWT_REFRESH_SECRET`, `POSTGRES_PASSWORD`) in production environments.
-
+x
 3. **Docker Compose Launch & Network Architecture**:
    ForgeGate enforces isolated internal container networking (`forgegate_internal`).
    
@@ -170,8 +182,6 @@ ForgeGate/
    | **API Gateway** | `3000` | `3000` | Primary external ingress API point |
    | **PostgreSQL** | Internal Only | `127.0.0.1:5432` | Multi-schema relational database |
    | **Redis** | Internal Only | `127.0.0.1:6379` | Cache, queues & rate limiting |
-   | **RabbitMQ** | Internal Only | `127.0.0.1:5672` | Message broker |
-   | **RabbitMQ Management** | Internal Only | `127.0.0.1:15672` | UI Dashboard (`http://localhost:15672`) |
    | **Prometheus** | Internal Only | `127.0.0.1:9090` | Metrics Scraper (`http://localhost:9090`) |
 
    ```bash
@@ -184,8 +194,8 @@ ForgeGate/
 
 4. **Database Schema Sync**:
    ```bash
-   npx prisma db push
-   pnpm run prisma:seed
+   pnpm run prisma:generate
+   pnpm run prisma:db-push
    ```
 
 5. **Build All Workspace Packages & Services**:
@@ -195,7 +205,7 @@ ForgeGate/
 
 6. **Execute Automated Test Suite**:
    ```bash
-   npx jest
+   pnpm run test
    ```
 
 7. **Start Microservices**:

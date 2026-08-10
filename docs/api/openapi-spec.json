@@ -1,28 +1,145 @@
 {
-  "openapi": "3.0.0",
+  "openapi": "3.0.3",
   "info": {
-    "title": "ForgeGate Distributed Backend Workflow Platform API",
+    "title": "ForgeGate Distributed Microservices API",
     "version": "1.0.0",
-    "description": "API Specification for ForgeGate Microservices"
+    "description": "OpenAPI Specification for ForgeGate API Gateway, Auth Service, and Workflow Engine Service."
   },
+  "servers": [
+    {
+      "url": "http://localhost:3000/api/v1",
+      "description": "API Gateway Entrypoint"
+    }
+  ],
   "paths": {
-    "/api/v1/health": {
+    "/health": {
       "get": {
-        "summary": "Gateway Health Check",
+        "summary": "Microservice Cluster Health Aggregator",
         "responses": {
           "200": {
-            "description": "Health status"
+            "description": "Cluster health status indicating PostgreSQL & Redis status."
           }
         }
       }
     },
-    "/api/v1/workflows": {
-      "post": {
-        "summary": "Create Workflow",
+    "/metrics": {
+      "get": {
+        "summary": "Prometheus Metrics Endpoint",
         "responses": {
-          "201": {
-            "description": "Workflow created successfully"
+          "200": {
+            "description": "Prometheus formatted metrics text stream."
           }
+        }
+      }
+    },
+    "/dashboard": {
+      "get": {
+        "summary": "Interactive Admin Monitoring Console",
+        "responses": {
+          "200": {
+            "description": "HTML dashboard UI."
+          }
+        }
+      }
+    },
+    "/auth/register": {
+      "post": {
+        "summary": "Register New User & Tenant",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "email": { "type": "string" },
+                  "password": { "type": "string" },
+                  "tenantName": { "type": "string" }
+                },
+                "required": ["email", "password"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": { "description": "User created successfully." }
+        }
+      }
+    },
+    "/auth/login": {
+      "post": {
+        "summary": "Authenticate User & Issue JWT Tokens",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "email": { "type": "string" },
+                  "password": { "type": "string" }
+                },
+                "required": ["email", "password"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": { "description": "JWT access token and refresh token issued." }
+        }
+      }
+    },
+    "/workflows": {
+      "get": {
+        "summary": "List Workflow Definitions",
+        "responses": {
+          "200": { "description": "List of workflows for authenticated tenant." }
+        }
+      },
+      "post": {
+        "summary": "Create Workflow Definition",
+        "responses": {
+          "201": { "description": "Workflow created successfully." }
+        }
+      }
+    },
+    "/workflows/{id}/trigger": {
+      "post": {
+        "summary": "Trigger Workflow Execution",
+        "parameters": [
+          { "name": "id", "in": "path", "required": true, "schema": { "type": "string" } },
+          { "name": "x-correlation-id", "in": "header", "required": false, "schema": { "type": "string" } },
+          { "name": "idempotency-key", "in": "header", "required": false, "schema": { "type": "string" } }
+        ],
+        "responses": {
+          "201": { "description": "Workflow execution enqueued." }
+        }
+      }
+    },
+    "/workflows/executions": {
+      "get": {
+        "summary": "Query Workflow Executions",
+        "responses": {
+          "200": { "description": "Paginated list of workflow executions." }
+        }
+      }
+    },
+    "/workflows/dlq/jobs": {
+      "get": {
+        "summary": "Inspect Dead-Letter Queue Jobs",
+        "responses": {
+          "200": { "description": "List of jobs in DLQ." }
+        }
+      }
+    },
+    "/workflows/dlq/{jobId}/retry": {
+      "post": {
+        "summary": "Replay Job from Dead-Letter Queue",
+        "parameters": [
+          { "name": "jobId", "in": "path", "required": true, "schema": { "type": "string" } }
+        ],
+        "responses": {
+          "200": { "description": "Job replayed and enqueued for execution." }
         }
       }
     }

@@ -22,11 +22,7 @@ pnpm audit --audit-level high
 ### B. Local Secret Scanning
 To scan your local git repository and staged commits for accidentally hardcoded secrets (API keys, JWTs, private keys, credentials):
 ```bash
-# Install Gitleaks (CLI)
-# macOS: brew install gitleaks
-# Linux: curl -sSFL https://github.com/zricethezav/gitleaks/releases/latest/download/gitleaks_linux_x64.tar.gz | tar -xz
-
-# Detect hardcoded secrets locally
+# Detect hardcoded secrets locally with Gitleaks
 gitleaks detect --verbose
 ```
 
@@ -37,8 +33,6 @@ To audit built Docker images for OS and library vulnerabilities:
 docker build -t forgegate-app:local .
 
 # Audit with Trivy CLI
-# macOS: brew install trivy
-# Linux: apt-get install trivy (or via curl)
 trivy image --severity HIGH,CRITICAL forgegate-app:local
 ```
 
@@ -60,10 +54,10 @@ ForgeGate CI executes the following security workflows on every `push` and `pull
 
 - **Environment Variables**: Use `.env.example` as a reference template. Never commit real secrets, private keys, DB credentials, or API keys to repository files.
 - **CI Secrets**: Store deployment and integration credentials strictly in GitHub Repository Secrets.
-- **Log Masking**: Ensure structured loggers mask or truncate tokens, authorization headers, and API keys.
+- **Log Masking**: Ensure structured loggers mask or truncate tokens, authorization headers, and API keys (`sanitizePayloadString`).
 
 ---
 
 ## 4. Reporting Vulnerabilities
 
-If you discover a potential security vulnerability in ForgeGate, please do not open a public issue. Report the security concern responsibly via email or security disclosure form.
+If you discover a potential security vulnerability in ForgeGate, please report the security concern responsibly via email or private security disclosure.
