@@ -311,4 +311,100 @@ describe('Outbound Rate Limiter Unit & Integration Tests', () => {
       expect(retryDecision.newNormalAttemptCount).toBe(1); // Budget preserved!
     });
   });
+
+  describe('5. Distributed Multi-Worker Concurrency & Prometheus Metrics', () => {
+    let engineService: WorkflowEngineService;
+    let prismaMock: any;
+
+    beforeEach(() => {
+      prismaMock = {
+        workflowExecution: {
+          findFirst: jest.fn(),
+          update: jest.fn(),
+        },
+        stepExecution: {
+          findFirst: jest.fn(),
+          create: jest.fn(),
+          update: jest.fn(),
+          updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+        },
+        executionLog: {
+          create: jest.fn(),
+        },
+      };
+
+      engineService = new WorkflowEngineService(prismaMock, limiter);
+    });
+
+    it('should coordinate rate limits across multiple distributed worker instances sharing Redis', async () => {
+      const sharedRedis = new InMemoryMockRedis();
+
+      // Create 3 worker instances sharing the same Redis instance
+      const worker1Limiter = new OutboundRateLimiter(sharedRedis as any, {
+        providerLimits: { 'api.openai.com': { limit: 10, windowSeconds: 60 } },
+      });
+      const worker2Limiter = new OutboundRateLimiter(sharedRedis as any, {
+        providerLimits: { 'api.openai.com': { limit: 10, windowSeconds: 60 } },
+      });
+      const worker3Limiter = new OutboundRateLimiter(sharedRedis as any, {
+        providerLimits: { 'api.openai.com': { limit: 10, windowSeconds: 60 } },
+      });
+
+      // 15 concurrent requests across worker 1, worker 2, worker 3
+      const workerTasks = [
+        ...Array.from({ length: 5 }, () => worker1Limiter.checkAndConsume({ tenantId: 't-1', provider: 'api.openai.com' })),
+        ...Array.from({ length: 5 }, () => worker2Limiter.checkAndConsume({ tenantId: 't-2', provider: 'api.openai.com' })),
+        ...Array.from({ length: 5 }, () => worker3Limiter.checkAndConsume({ tenantId: 't-3', provider: 'api.openai.com' })),
+      ];
+
+      const results = await Promise.all(workerTasks);
+      const allowed = results.filter((r) => r.allowed).length;
+      const rateLimited = results.filter((r) => !r.allowed).length;
+
+      expect(allowed).toBe(10);
+      expect(rateLimited).toBe(5);
+    });
+
+    it('should verify Prometheus metrics use low-cardinality labels without tenantId or executionId', async () => {
+      const metricsService = (engineService as any).metricsService;
+      const getMetricsSpy = jest.spyOn(metricsService.outboundHttpRateLimitAllowedTotal, 'inc');
+      const getLimitedSpy = jest.spyOn(metricsService.outboundHttpRateLimitLimitedTotal, 'inc');
+
+      limiter.setConfig({
+        providerLimits: { 'api.stripe.com': { limit: 1, windowSeconds: 60 } },
+      });
+
+      // Execute step 1 -> Allowed
+      prismaMock.workflowExecution.findFirst.mockResolvedValue({
+        id: 'exec-m1',
+        tenantId: 'tenant-sensitive-123',
+        workflowId: 'wf-1',
+        currentStep: 1,
+        status: 'running',
+        workflow: {
+          steps: [
+            { id: 's1', order: 1, stepOrder: 1, actionType: 'http_request', config: { url: 'https://api.stripe.com/v1/charges' } },
+          ],
+        },
+      });
+      prismaMock.stepExecution.findFirst.mockResolvedValue(null);
+      prismaMock.stepExecution.create.mockResolvedValue({ id: 'se-1', status: 'RUNNING' });
+      mockedAxios.mockResolvedValue({ status: 200, data: { ok: true } } as any);
+
+      await engineService.executeExecution('exec-m1', 'tenant-sensitive-123', 1);
+
+      expect(getMetricsSpy).toHaveBeenCalledWith({ provider: 'api.stripe.com' });
+      expect(getMetricsSpy.mock.calls[0][0]).not.toHaveProperty('tenantId');
+      expect(getMetricsSpy.mock.calls[0][0]).not.toHaveProperty('executionId');
+
+      // Execute step 2 -> Rate Limited
+      try {
+        await engineService.executeExecution('exec-m1', 'tenant-sensitive-123', 1);
+      } catch {}
+
+      expect(getLimitedSpy).toHaveBeenCalledWith({ provider: 'api.stripe.com', scope: 'provider' });
+      expect(getLimitedSpy.mock.calls[0][0]).not.toHaveProperty('tenantId');
+      expect(getLimitedSpy.mock.calls[0][0]).not.toHaveProperty('executionId');
+    });
+  });
 });

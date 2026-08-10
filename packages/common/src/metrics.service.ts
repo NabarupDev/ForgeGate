@@ -27,6 +27,9 @@ export class MetricsService implements OnModuleInit {
   public outboundHttpRequestDuration: client.Histogram<'provider'>;
   public outboundHttpRateLimitDeferralsTotal: client.Counter<'provider'>;
   public outboundHttpTimeoutsTotal: client.Counter<'provider'>;
+  public outboundHttpRateLimitAllowedTotal: client.Counter<'provider'>;
+  public outboundHttpRateLimitLimitedTotal: client.Counter<'provider' | 'scope'>;
+  public outboundHttpFailuresTotal: client.Counter<'provider' | 'category'>;
 
   // Backpressure
   public backpressureRejectionsTotal: client.Counter<'type'>;
@@ -126,6 +129,24 @@ export class MetricsService implements OnModuleInit {
       name: 'forgegate_outbound_http_timeouts_total',
       help: 'Total outbound HTTP timeouts by provider',
       labelNames: ['provider'],
+    });
+
+    this.outboundHttpRateLimitAllowedTotal = this.getOrCreateCounter({
+      name: 'forgegate_outbound_http_rate_limit_allowed_total',
+      help: 'Total allowed outbound HTTP requests passed by rate limiter by provider',
+      labelNames: ['provider'],
+    });
+
+    this.outboundHttpRateLimitLimitedTotal = this.getOrCreateCounter({
+      name: 'forgegate_outbound_http_rate_limit_limited_total',
+      help: 'Total rate-limited outbound HTTP pre-flight checks by provider and exceeded scope',
+      labelNames: ['provider', 'scope'],
+    });
+
+    this.outboundHttpFailuresTotal = this.getOrCreateCounter({
+      name: 'forgegate_outbound_http_failures_total',
+      help: 'Total outbound HTTP request failures by provider and failure category',
+      labelNames: ['provider', 'category'],
     });
 
     // 5. Backpressure Metrics

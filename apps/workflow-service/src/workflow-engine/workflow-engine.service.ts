@@ -490,6 +490,10 @@ export class WorkflowEngineService {
             this.metricsService.backpressureRejectionsTotal.inc({ type: 'rate_limit' });
             this.metricsService.backpressureDeferredJobsTotal.inc({ reason: 'rate_limit' });
             this.metricsService.outboundHttpRateLimitDeferralsTotal.inc({ provider: providerHost });
+            this.metricsService.outboundHttpRateLimitLimitedTotal.inc({
+              provider: providerHost,
+              scope: checkResult.exceededScope || 'unknown',
+            });
 
             throw new HttpStepError({
               category: 'RATE_LIMITED',
@@ -501,6 +505,8 @@ export class WorkflowEngineService {
               method,
             });
           }
+
+          this.metricsService.outboundHttpRateLimitAllowedTotal.inc({ provider: providerHost });
         }
 
         let concurrencyLease: ConcurrencyLease | undefined;
@@ -555,6 +561,7 @@ export class WorkflowEngineService {
           const statusCode = String(classifiedErr.statusCode || (err.response?.status) || 500);
           this.metricsService.outboundHttpRequestsTotal.inc({ provider: providerHost, status_code: statusCode });
           this.metricsService.outboundHttpRequestDuration.observe({ provider: providerHost }, httpDurationMs / 1000);
+          this.metricsService.outboundHttpFailuresTotal.inc({ provider: providerHost, category: classifiedErr.category });
 
           if (classifiedErr.category === 'RATE_LIMITED') {
             this.metricsService.outboundHttpRateLimitDeferralsTotal.inc({ provider: providerHost });

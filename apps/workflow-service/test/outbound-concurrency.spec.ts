@@ -13,12 +13,14 @@ class InMemoryMockRedis {
   private ttls: Map<string, number> = new Map();
 
   async incr(key: string): Promise<number> {
+    this.cleanExpired();
     const val = (this.store.get(key) || 0) + 1;
     this.store.set(key, val);
     return val;
   }
 
   async decr(key: string): Promise<number> {
+    this.cleanExpired();
     const val = (this.store.get(key) || 0) - 1;
     const newVal = Math.max(0, val);
     this.store.set(key, newVal);
@@ -38,6 +40,26 @@ class InMemoryMockRedis {
 
   async quit(): Promise<'OK'> {
     return 'OK';
+  }
+
+  advanceTime(seconds: number) {
+    const now = Date.now() + seconds * 1000;
+    for (const [key, expireAt] of this.ttls.entries()) {
+      if (expireAt <= now) {
+        this.store.delete(key);
+        this.ttls.delete(key);
+      }
+    }
+  }
+
+  private cleanExpired() {
+    const now = Date.now();
+    for (const [key, expireAt] of this.ttls.entries()) {
+      if (expireAt <= now) {
+        this.store.delete(key);
+        this.ttls.delete(key);
+      }
+    }
   }
 }
 
@@ -285,6 +307,146 @@ describe('Outbound Concurrency Control Unit & Integration Tests', () => {
       const metrics = concurrencyLimiter.getMetrics();
       expect(metrics.acquiredTotal).toBe(1);
       expect(metrics.releasedTotal).toBe(1);
+    });
+
+    it('should release lease on HTTP request timeout', async () => {
+      concurrencyLimiter.setConfig({
+        providerLimits: { 'api.timeout.com': 1 },
+      });
+
+      const mockWorkflowExecution = {
+        id: 'exec-conc-timeout',
+        tenantId: 'tenant-1',
+        workflowId: 'wf-1',
+        currentStep: 1,
+        status: 'running',
+        workflow: {
+          steps: [
+            {
+              id: 'step-conc-timeout',
+              order: 1,
+              stepOrder: 1,
+              actionType: 'http_request',
+              config: { url: 'https://api.timeout.com/data' },
+            },
+          ],
+        },
+      };
+
+      prismaMock.workflowExecution.findFirst.mockResolvedValue(mockWorkflowExecution);
+      prismaMock.stepExecution.findFirst.mockResolvedValue(null);
+      prismaMock.stepExecution.create.mockResolvedValue({
+        id: 'se-conc-timeout',
+        executionId: 'exec-conc-timeout',
+        stepId: 'step-conc-timeout',
+        attempt: 1,
+        status: 'RUNNING',
+      });
+
+      const timeoutError: any = new Error('timeout of 5000ms exceeded');
+      timeoutError.code = 'ECONNABORTED';
+      mockedAxios.mockRejectedValueOnce(timeoutError);
+
+      try {
+        await engineService.executeExecution('exec-conc-timeout', 'tenant-1', 1);
+      } catch (err) {
+        // Expected timeout failure
+      }
+
+      // Verify slot was released in finally block on timeout
+      const metrics = concurrencyLimiter.getMetrics();
+      expect(metrics.acquiredTotal).toBe(1);
+      expect(metrics.releasedTotal).toBe(1);
+    });
+  });
+
+  describe('4. Worker Crash Recovery & Multi-Worker Concurrency', () => {
+    it('should recover leaked capacity after worker crash via Redis lease TTL expiration', async () => {
+      const sharedRedis = new InMemoryMockRedis();
+      const workerLimiter = new OutboundConcurrencyLimiter(sharedRedis as any, {
+        providerLimits: { stripe: 1 },
+      });
+
+      // Worker 1 acquires slot but crashes before releasing
+      const res1 = await workerLimiter.acquire({ tenantId: 'tenant-a', provider: 'stripe' });
+      expect(res1.acquired).toBe(true);
+
+      // Worker 2 attempts acquire immediately -> Rejected (Worker 1 holds capacity)
+      const res2Immediate = await workerLimiter.acquire({ tenantId: 'tenant-b', provider: 'stripe' });
+      expect(res2Immediate.acquired).toBe(false);
+
+      // Fast-forward time past lease TTL (60s) to simulate worker crash cleanup
+      sharedRedis.advanceTime(61);
+
+      // Worker 2 retries -> Capacity recovered automatically!
+      const res2AfterRecovery = await workerLimiter.acquire({ tenantId: 'tenant-b', provider: 'stripe' });
+      expect(res2AfterRecovery.acquired).toBe(true);
+    });
+
+    it('should enforce multi-scope concurrency limits matching prompt requirements (Global=100, OpenAI=20, Stripe=10, Tenant A+OpenAI=5)', async () => {
+      const sharedRedis = new InMemoryMockRedis();
+      const limiterInstance = new OutboundConcurrencyLimiter(sharedRedis as any, {
+        globalMaxConcurrency: 100,
+        providerLimits: {
+          openai: 20,
+          stripe: 10,
+        },
+        tenantProviderLimits: {
+          'tenant-a': { openai: 5 },
+        },
+      });
+
+      // 1. Tenant A fills its tenant+provider quota (5 slots for openai)
+      const tenantAOpenAiAcquires = await Promise.all(
+        Array.from({ length: 5 }, () => limiterInstance.acquire({ tenantId: 'tenant-a', provider: 'openai' })),
+      );
+      expect(tenantAOpenAiAcquires.every((r) => r.acquired)).toBe(true);
+
+      // 6th attempt by Tenant A for OpenAI -> Exceeds tenant-a + openai limit (5)
+      const tenantA6th = await limiterInstance.acquire({ tenantId: 'tenant-a', provider: 'openai' });
+      expect(tenantA6th.acquired).toBe(false);
+      expect(tenantA6th.exceededScope).toBe('tenant_provider');
+
+      // 2. Tenant B can still acquire OpenAI slots (leaving remaining 15 slots for provider openai)
+      const tenantBOpenAiAcquires = await Promise.all(
+        Array.from({ length: 5 }, () => limiterInstance.acquire({ tenantId: 'tenant-b', provider: 'openai' })),
+      );
+      expect(tenantBOpenAiAcquires.every((r) => r.acquired)).toBe(true);
+
+      // 3. Tenant A can still acquire Stripe slots (Stripe limit = 10)
+      const tenantAStripe = await limiterInstance.acquire({ tenantId: 'tenant-a', provider: 'stripe' });
+      expect(tenantAStripe.acquired).toBe(true);
+    });
+
+    it('should coordinate concurrency limits across 3 distributed worker instances sharing Redis', async () => {
+      const sharedRedis = new InMemoryMockRedis();
+
+      const worker1 = new OutboundConcurrencyLimiter(sharedRedis as any, { providerLimits: { openai: 3 } });
+      const worker2 = new OutboundConcurrencyLimiter(sharedRedis as any, { providerLimits: { openai: 3 } });
+      const worker3 = new OutboundConcurrencyLimiter(sharedRedis as any, { providerLimits: { openai: 3 } });
+
+      // Worker 1 acquires 1
+      const resW1 = await worker1.acquire({ tenantId: 't1', provider: 'openai' });
+      // Worker 2 acquires 1
+      const resW2 = await worker2.acquire({ tenantId: 't2', provider: 'openai' });
+      // Worker 3 acquires 1
+      const resW3 = await worker3.acquire({ tenantId: 't3', provider: 'openai' });
+
+      expect(resW1.acquired).toBe(true);
+      expect(resW2.acquired).toBe(true);
+      expect(resW3.acquired).toBe(true);
+
+      // Worker 1 tries 4th slot -> Exceeds provider limit (3) across distributed workers!
+      const resW1Overflow = await worker1.acquire({ tenantId: 't4', provider: 'openai' });
+      expect(resW1Overflow.acquired).toBe(false);
+      expect(resW1Overflow.exceededScope).toBe('provider');
+
+      // Worker 2 releases lease
+      await worker2.release(resW2.lease);
+
+      // Worker 3 tries again -> Successfully acquires newly released slot!
+      const resW3Retry = await worker3.acquire({ tenantId: 't4', provider: 'openai' });
+      expect(resW3Retry.acquired).toBe(true);
     });
   });
 });
