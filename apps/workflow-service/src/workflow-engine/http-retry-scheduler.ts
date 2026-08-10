@@ -69,11 +69,11 @@ export function calculateRetryDecision(
   const category = isHttpErr ? error.category : undefined;
   const retryAfterSeconds = isHttpErr ? error.retryAfterSeconds : null;
 
-  // 3. Rate Limited or Overload with Retry-After header / 429 / 503 / 529
+  // 3. Rate Limited or Overload with Retry-After header / 429 / 529
   const isRateLimitedOrOverloaded =
     category === 'RATE_LIMITED' ||
     retryAfterSeconds !== null ||
-    (isHttpErr && (error.statusCode === 529 || error.statusCode === 503));
+    (isHttpErr && error.statusCode === 529);
 
   if (isRateLimitedOrOverloaded) {
     if (rateLimitDeferralsCount >= maxDeferrals) {
@@ -89,8 +89,11 @@ export function calculateRetryDecision(
 
     let delayMs: number;
     if (retryAfterSeconds !== null && retryAfterSeconds !== undefined) {
-      // Respect Retry-After header (bounded by maxDelayMs)
-      delayMs = Math.min(maxDelayMs, Math.max(0, retryAfterSeconds * 1000));
+      // Respect Retry-After header (bounded by maxDelayMs and minimum initialDelayMs to avoid immediate retry loops)
+      const targetDelayMs = retryAfterSeconds * 1000;
+      const initialDelay = config.initialDelayMs ?? 1000;
+      const safeDelay = Math.max(initialDelay, targetDelayMs);
+      delayMs = Math.min(maxDelayMs, safeDelay);
     } else {
       // Rate limited without Retry-After -> bounded exponential backoff
       delayMs = calculateExponentialBackoff(currentNormalAttempt, config);
@@ -102,7 +105,7 @@ export function calculateRetryDecision(
       reason: 'rate_limited_deferred',
       isRateLimitDeferral: true,
       newRateLimitDeferralsCount: rateLimitDeferralsCount + 1,
-      newNormalAttemptCount: currentNormalAttempt, // Do NOT consume normal retry budget
+      newNormalAttemptCount: currentNormalAttempt,
     };
   }
 

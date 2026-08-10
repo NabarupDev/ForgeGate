@@ -222,8 +222,8 @@ describe('HTTP Step Error Classifier & Intelligent Retry Scheduler Unit Tests', 
       });
     });
 
-    describe('Test F: network timeout', () => {
-      it('should classify network/timeout failure and schedule retry using exponential backoff', () => {
+    describe('Test F: timeout', () => {
+      it('should classify timeout failure and schedule retry using exponential backoff', () => {
         const err = classifyHttpError({
           code: 'ETIMEDOUT',
           message: 'connect ETIMEDOUT',
@@ -234,6 +234,48 @@ describe('HTTP Step Error Classifier & Intelligent Retry Scheduler Unit Tests', 
         expect(decision.isRateLimitDeferral).toBe(false);
         expect(decision.newNormalAttemptCount).toBe(2);
         expect(decision.reason).toBe('transient_backoff_retry');
+      });
+    });
+
+    describe('Test F2: network failure', () => {
+      it('should classify ECONNREFUSED network failure and schedule retry consuming normal attempt budget', () => {
+        const err = classifyHttpError({
+          code: 'ECONNREFUSED',
+          message: 'connect ECONNREFUSED 127.0.0.1:8080',
+        }, 'http://127.0.0.1:8080', 'GET');
+
+        const decision = calculateRetryDecision(err, 1, 0, mockCreatedAt, config);
+        expect(decision.shouldRetry).toBe(true);
+        expect(decision.isRateLimitDeferral).toBe(false);
+        expect(decision.newNormalAttemptCount).toBe(2);
+        expect(decision.reason).toBe('transient_backoff_retry');
+      });
+    });
+
+    describe('Test F3: 503 without Retry-After', () => {
+      it('should use exponential backoff and consume normal attempt budget when 503 has no Retry-After header', () => {
+        const err = classifyHttpError({
+          response: { status: 503, headers: {} },
+        }, 'https://api.example.com/service', 'GET');
+
+        const decision = calculateRetryDecision(err, 1, 0, mockCreatedAt, config);
+        expect(decision.shouldRetry).toBe(true);
+        expect(decision.isRateLimitDeferral).toBe(false);
+        expect(decision.newNormalAttemptCount).toBe(2);
+        expect(decision.reason).toBe('transient_backoff_retry');
+      });
+    });
+
+    describe('Test F4: 429 with Retry-After: 0', () => {
+      it('should enforce minimum initial delay to avoid immediate retry loops', () => {
+        const err = classifyHttpError({
+          response: { status: 429, headers: { 'retry-after': '0' } },
+        }, 'https://api.example.com/rate-limited', 'POST');
+
+        const decision = calculateRetryDecision(err, 1, 0, mockCreatedAt, config);
+        expect(decision.shouldRetry).toBe(true);
+        expect(decision.delayMs).toBeGreaterThanOrEqual(1000); // Enforces initialDelayMs minimum
+        expect(decision.isRateLimitDeferral).toBe(true);
       });
     });
 
@@ -249,7 +291,19 @@ describe('HTTP Step Error Classifier & Intelligent Retry Scheduler Unit Tests', 
       });
     });
 
-    describe('Test H: maximum rate-limit deferrals', () => {
+    describe('Test G2: retry exhaustion', () => {
+      it('should stop retrying when normal retry attempt budget (3) is exhausted', () => {
+        const err = classifyHttpError({
+          response: { status: 500, headers: {} },
+        }, 'https://api.example.com/error', 'GET');
+
+        const decision = calculateRetryDecision(err, 3, 0, mockCreatedAt, config);
+        expect(decision.shouldRetry).toBe(false);
+        expect(decision.reason).toBe('max_normal_retries_exceeded');
+      });
+    });
+
+    describe('Test H: rate-limit deferral exhaustion', () => {
       it('should stop retrying when maximum rate-limit deferrals threshold (5) is reached', () => {
         const err = classifyHttpError({
           response: { status: 429, headers: { 'retry-after': '10' } },

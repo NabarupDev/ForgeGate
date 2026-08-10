@@ -18,6 +18,8 @@ export class ExecutionController {
     @Param('id') id: string,
     @Body() dto: TriggerExecutionDto,
     @Headers('x-correlation-id') correlationHeader: string,
+    @Headers('idempotency-key') idempotencyHeader: string,
+    @Headers('x-idempotency-key') xIdempotencyHeader: string,
     @CurrentUser() user: UserContext,
   ) {
     const correlationId =
@@ -25,10 +27,13 @@ export class ExecutionController {
       dto.metadata?.correlationId ||
       `corr-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
 
+    const idempotencyKey = idempotencyHeader || xIdempotencyHeader;
+
     return this.executionService.triggerWorkflow(
       id,
       { ...dto, metadata: { ...dto.metadata, correlationId } },
       user,
+      idempotencyKey,
     );
   }
 }

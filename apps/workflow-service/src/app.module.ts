@@ -7,6 +7,7 @@ import { WorkflowService } from './workflow/workflow.service';
 
 import { ExecutionController } from './execution/execution.controller';
 import { ExecutionService } from './execution/execution.service';
+import { ApiIdempotencyService } from './execution/api-idempotency.service';
 
 import { QueueController } from './queue/queue.controller';
 import { QueueService } from './queue/queue.service';
@@ -22,6 +23,7 @@ import { WorkflowEngineService } from './workflow-engine/workflow-engine.service
     PrismaService,
     WorkflowService,
     ExecutionService,
+    ApiIdempotencyService,
     QueueService,
     WorkflowEngineService,
   ],
@@ -29,6 +31,7 @@ import { WorkflowEngineService } from './workflow-engine/workflow-engine.service
     PrismaService,
     WorkflowService,
     ExecutionService,
+    ApiIdempotencyService,
     QueueService,
     WorkflowEngineService,
   ],

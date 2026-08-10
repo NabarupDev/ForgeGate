@@ -1,54 +1,75 @@
-import { Injectable, NotFoundException, ForbiddenException } from '@nestjs/common';
+import { Injectable, NotFoundException, ForbiddenException, Optional } from '@nestjs/common';
 import { PrismaService } from '../prisma.service';
 import { QueueService } from '../queue/queue.service';
 import { TriggerExecutionDto } from './dto/trigger-execution.dto';
 import { UserContext, AuthorizationPolicy } from '@forgegate/auth';
+import { ApiIdempotencyService } from './api-idempotency.service';
 
 @Injectable()
 export class ExecutionService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly queueService: QueueService,
+    @Optional() private readonly idempotencyService?: ApiIdempotencyService,
   ) {}
 
-  async triggerWorkflow(id: string, dto: TriggerExecutionDto, user?: UserContext) {
-    const targetTenantId = user?.tenantId || dto.tenantId;
+  async triggerWorkflow(
+    id: string,
+    dto: TriggerExecutionDto,
+    user?: UserContext,
+    idempotencyKey?: string,
+  ) {
+    const targetTenantId = user?.tenantId || dto.tenantId || 'default';
+    const operationScope = `trigger:${id}`;
 
-    // 1. Enforce tenant isolation lookup when user/tenant context is provided
-    let wf: any = null;
-    if (typeof this.prisma.workflow.findFirst === 'function' && targetTenantId) {
-      wf = await this.prisma.workflow.findFirst({
-        where: { id, tenantId: targetTenantId },
+    const executeOperation = async () => {
+      // 1. Enforce tenant isolation lookup when user/tenant context is provided
+      let wf: any = null;
+      if (typeof this.prisma.workflow.findFirst === 'function' && targetTenantId) {
+        wf = await this.prisma.workflow.findFirst({
+          where: { id, tenantId: targetTenantId },
+        });
+      } else {
+        wf = await this.prisma.workflow.findUnique({ where: { id } });
+      }
+
+      if (!wf) throw new NotFoundException('Workflow not found');
+
+      // 2. Server-side policy authorization check if user context exists
+      if (user && !AuthorizationPolicy.can(user, 'workflow:execute', wf)) {
+        throw new ForbiddenException(`Role '${user.role}' is not authorized to trigger workflow execution`);
+      }
+
+      const tenantId = user?.tenantId || dto.tenantId || wf.tenantId;
+
+      const execution = await this.prisma.workflowExecution.create({
+        data: {
+          workflowId: wf.id,
+          tenantId,
+          status: 'pending',
+          metadata: dto.metadata || {},
+        },
       });
-    } else {
-      wf = await this.prisma.workflow.findUnique({ where: { id } });
-    }
 
-    if (!wf) throw new NotFoundException('Workflow not found');
+      const queueResult = await this.queueService.addExecutionJob(execution.id, tenantId);
 
-    // 2. Server-side policy authorization check if user context exists
-    if (user && !AuthorizationPolicy.can(user, 'workflow:execute', wf)) {
-      throw new ForbiddenException(`Role '${user.role}' is not authorized to trigger workflow execution`);
-    }
-
-    const tenantId = user?.tenantId || dto.tenantId || wf.tenantId;
-
-    const execution = await this.prisma.workflowExecution.create({
-      data: {
-        workflowId: wf.id,
-        tenantId,
-        status: 'pending',
-        metadata: dto.metadata || {},
-      },
-    });
-
-    const queueResult = await this.queueService.addExecutionJob(execution.id, tenantId);
-
-    return {
-      executionId: execution.id,
-      status: execution.status,
-      queue: queueResult,
+      return {
+        executionId: execution.id,
+        status: execution.status,
+        queue: queueResult,
+      };
     };
+
+    if (this.idempotencyService && idempotencyKey) {
+      return this.idempotencyService.processIdempotentOperation(
+        targetTenantId,
+        operationScope,
+        idempotencyKey,
+        executeOperation,
+      );
+    }
+
+    return executeOperation();
   }
 
   async getExecution(id: string, user?: UserContext) {

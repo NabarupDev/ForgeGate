@@ -204,4 +204,63 @@ describe('HTTP Step Timeout Handling & State Persistence Unit Tests', () => {
       );
     });
   });
+
+  describe('4. Crash Recovery Integration for Stale RUNNING / Timed-Out Steps', () => {
+    let engineService: WorkflowEngineService;
+    let prismaMock: any;
+
+    beforeEach(() => {
+      jest.clearAllMocks();
+
+      prismaMock = {
+        stepExecution: {
+          findMany: jest.fn(),
+          updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+        },
+        workflowExecution: {
+          update: jest.fn().mockResolvedValue({}),
+        },
+      };
+
+      engineService = new WorkflowEngineService(prismaMock);
+    });
+
+    it('should recover stale RUNNING steps whose lease expired and transition status to TIMED_OUT', async () => {
+      const expiredHeartbeat = new Date(Date.now() - 45000); // Exceeds 30s lease
+      prismaMock.stepExecution.findMany.mockResolvedValue([
+        {
+          id: 'se-stale-timeout',
+          executionId: 'exec-recovery-test',
+          status: 'RUNNING',
+          startedAt: expiredHeartbeat,
+          heartbeatAt: expiredHeartbeat,
+          execution: { id: 'exec-recovery-test', tenantId: 'tenant-1', status: 'running' },
+        },
+      ]);
+
+      const recovered = await engineService.findAndMarkStaleStepExecutions(30000);
+
+      expect(recovered).toHaveLength(1);
+      expect(recovered[0].executionId).toBe('exec-recovery-test');
+
+      // Verify old worker's step status was transitioned from RUNNING to TIMED_OUT
+      expect(prismaMock.stepExecution.updateMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: 'se-stale-timeout', status: 'RUNNING' },
+          data: expect.objectContaining({
+            status: 'TIMED_OUT',
+            error: 'Worker lease expired (crash detected)',
+          }),
+        }),
+      );
+
+      // Verify workflow execution status transitioned to retrying
+      expect(prismaMock.workflowExecution.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: 'exec-recovery-test' },
+          data: { status: 'retrying' },
+        }),
+      );
+    });
+  });
 });
