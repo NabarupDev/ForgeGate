@@ -1,22 +1,30 @@
-import { Controller, Get, Post, Param } from '@nestjs/common';
+import { Controller, Get, Post, Param, UseGuards } from '@nestjs/common';
 import { QueueService } from './queue.service';
+import { JwtAuthGuard, RolesGuard, Roles, CurrentUser, UserContext } from '@forgegate/auth';
 
 @Controller('workflows')
+@UseGuards(JwtAuthGuard, RolesGuard)
 export class QueueController {
   constructor(private readonly queueService: QueueService) {}
 
   @Get('metrics/queue')
+  @Roles('admin', 'operator')
   async getQueueMetrics() {
     return this.queueService.getMetrics();
   }
 
   @Get('dlq/jobs')
-  async getDlqJobs() {
-    return this.queueService.getDlqJobs();
+  @Roles('admin', 'operator')
+  async getDlqJobs(@CurrentUser() user: UserContext) {
+    const tenantId = user?.role === 'admin' ? undefined : user?.tenantId;
+    return this.queueService.getDlqJobs(tenantId);
   }
 
   @Post('dlq/:jobId/retry')
-  async retryDlqJob(@Param('jobId') jobId: string) {
-    return this.queueService.replayDlqJob(jobId);
+  @Roles('admin', 'operator')
+  async retryDlqJob(@Param('jobId') jobId: string, @CurrentUser() user: UserContext) {
+    const operatorId = user?.id || user?.email || 'operator';
+    const requestTenantId = user?.role === 'admin' ? undefined : user?.tenantId;
+    return this.queueService.replayDlqJob(jobId, operatorId, requestTenantId);
   }
 }

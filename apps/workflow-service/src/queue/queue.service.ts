@@ -1,4 +1,4 @@
-import { Injectable, OnModuleInit, OnModuleDestroy } from '@nestjs/common';
+import { Injectable, OnModuleInit, OnModuleDestroy, ForbiddenException, ConflictException } from '@nestjs/common';
 import { Queue, Worker, QueueEvents, Job } from 'bullmq';
 import { StructuredLogger } from '@forgegate/logger';
 import { MetricsService } from '@forgegate/common';
@@ -13,7 +13,50 @@ export function sanitizePayloadString(str: string): string {
     .replace(/(api[-_]?key\s*[:=]\s*)([^\s,]+)/gi, '$1[REDACTED]')
     .replace(/(password\s*[:=]\s*)([^\s,]+)/gi, '$1[REDACTED]')
     .replace(/(token\s*[:=]\s*)([^\s,]+)/gi, '$1[REDACTED]')
-    .replace(/(secret\s*[:=]\s*)([^\s,]+)/gi, '$1[REDACTED]');
+    .replace(/(secret\s*[:=]\s*)([^\s,]+)/gi, '$1[REDACTED]')
+    .replace(/(cookie\s*[:=]\s*)([^\s,]+)/gi, '$1[REDACTED]')
+    .replace(/(jwt\s*[:=]\s*)([^\s,]+)/gi, '$1[REDACTED]')
+    .replace(/(refresh[-_]?token\s*[:=]\s*)([^\s,]+)/gi, '$1[REDACTED]')
+    .replace(/(credentials\s*[:=]\s*)([^\s,]+)/gi, '$1[REDACTED]');
+}
+
+export function sanitizePayloadObject(data: any): any {
+  if (data === null || data === undefined) return data;
+  if (typeof data === 'string') return sanitizePayloadString(data);
+  if (typeof data !== 'object') return data;
+  if (Array.isArray(data)) return data.map(sanitizePayloadObject);
+
+  const sensitiveKeys = [
+    'authorization',
+    'auth',
+    'cookie',
+    'x-api-key',
+    'apikey',
+    'api_key',
+    'token',
+    'secret',
+    'password',
+    'bearer',
+    'jwt',
+    'access_token',
+    'refresh_token',
+    'private_key',
+    'credentials',
+  ];
+  const sanitized: Record<string, any> = {};
+
+  for (const [key, value] of Object.entries(data)) {
+    if (sensitiveKeys.includes(key.toLowerCase())) {
+      sanitized[key] = '[REDACTED]';
+    } else if (typeof value === 'object' && value !== null) {
+      sanitized[key] = sanitizePayloadObject(value);
+    } else if (typeof value === 'string') {
+      sanitized[key] = sanitizePayloadString(value);
+    } else {
+      sanitized[key] = value;
+    }
+  }
+  return sanitized;
 }
 
 @Injectable()
@@ -274,7 +317,7 @@ export class QueueService implements OnModuleInit, OnModuleDestroy {
     return { jobId: res.jobId, status: 'enqueued' };
   }
 
-  async replayDlqJob(jobId: string, operatorId: string = 'operator') {
+  async replayDlqJob(jobId: string, operatorId: string = 'operator', requestTenantId?: string) {
     if (!this.dlqQueue) {
       throw new Error(`DLQ Queue unavailable`);
     }
@@ -285,6 +328,11 @@ export class QueueService implements OnModuleInit, OnModuleDestroy {
     }
 
     const { executionId, tenantId, replayed, correlationId } = job.data;
+
+    // Cross-tenant replay guard
+    if (requestTenantId && tenantId !== requestTenantId) {
+      throw new ForbiddenException(`Cross-tenant DLQ replay forbidden. Job belongs to tenant '${tenantId}'`);
+    }
 
     // 1. Prevent duplicate replay if already replayed or currently active in queue
     const activeJobs =
@@ -359,10 +407,10 @@ export class QueueService implements OnModuleInit, OnModuleDestroy {
     };
   }
 
-  async getDlqJobs() {
+  async getDlqJobs(filterTenantId?: string) {
     if (!this.dlqQueue) return [];
     const jobs = await this.dlqQueue.getJobs(['waiting', 'active', 'completed', 'failed']);
-    return jobs.map((job) => {
+    const mapped = jobs.map((job) => {
       const d = job.data || {};
       const isRateLimited = (d.rateLimitDeferralCount || 0) > 0 || d.failureCategory === 'RATE_LIMITED';
       const replayed = Boolean(d.replayed);
@@ -384,11 +432,18 @@ export class QueueService implements OnModuleInit, OnModuleDestroy {
         timestamp: d.timestamp || new Date(job.timestamp).toISOString(),
         lastAttemptTimestamp: d.lastAttemptTimestamp || new Date(job.timestamp).toISOString(),
         correlationId: d.correlationId || d.executionId,
+        retryHistory: d.retryHistory || [],
         replayed,
         replayedAt: d.replayedAt || null,
+        replayedBy: d.replayedBy || null,
         retryableAt: replayed ? 'N/A' : 'Immediate upon replay',
       };
     });
+
+    if (filterTenantId) {
+      return mapped.filter((item) => item.tenantId === filterTenantId);
+    }
+    return mapped;
   }
 
   async replayDeadLetterExecution(executionId: string, tenantId: string) {
