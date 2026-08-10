@@ -16,7 +16,7 @@ jobs:
         image: postgres:16-alpine
         env:
           POSTGRES_USER: forgegate
-          POSTGRES_PASSWORD: forgegate_secret_pass
+          POSTGRES_PASSWORD: TEST_ONLY_CI_POSTGRES_PASSWORD
           POSTGRES_DB: forgegate_db
         ports:
           - 5432:5432
@@ -56,12 +56,12 @@ jobs:
 
       - name: Prisma Schema Validation
         env:
-          DATABASE_URL: "postgresql://forgegate:forgegate_secret_pass@localhost:5432/forgegate_db?schema=public"
+          DATABASE_URL: "postgresql://forgegate:TEST_ONLY_CI_POSTGRES_PASSWORD@localhost:5432/forgegate_db?schema=public"
         run: pnpm exec prisma validate
 
       - name: Generate Prisma Client
         env:
-          DATABASE_URL: "postgresql://forgegate:forgegate_secret_pass@localhost:5432/forgegate_db?schema=public"
+          DATABASE_URL: "postgresql://forgegate:TEST_ONLY_CI_POSTGRES_PASSWORD@localhost:5432/forgegate_db?schema=public"
         run: pnpm run prisma:generate
 
       - name: Build Monorepo Workspace
@@ -73,14 +73,23 @@ jobs:
       - name: Typecheck
         run: pnpm run typecheck
 
-      - name: Run Unit & Integration Tests
+      - name: Run Unit Tests
         env:
-          DATABASE_URL: "postgresql://forgegate:forgegate_secret_pass@localhost:5432/forgegate_db?schema=public"
+          DATABASE_URL: "postgresql://forgegate:TEST_ONLY_CI_POSTGRES_PASSWORD@localhost:5432/forgegate_db?schema=public"
           REDIS_HOST: "localhost"
           REDIS_PORT: "6379"
-          JWT_ACCESS_SECRET: "ci_jwt_access_secret_12345"
-          JWT_REFRESH_SECRET: "ci_jwt_refresh_secret_12345"
-        run: pnpm run test
+          JWT_ACCESS_SECRET: "TEST_ONLY_CI_JWT_ACCESS_SECRET_12345"
+          JWT_REFRESH_SECRET: "TEST_ONLY_CI_JWT_REFRESH_SECRET_12345"
+        run: pnpm run test:unit
+
+      - name: Run Failure Injection & Matrix Integration Tests
+        env:
+          DATABASE_URL: "postgresql://forgegate:TEST_ONLY_CI_POSTGRES_PASSWORD@localhost:5432/forgegate_db?schema=public"
+          REDIS_HOST: "localhost"
+          REDIS_PORT: "6379"
+          JWT_ACCESS_SECRET: "TEST_ONLY_CI_JWT_ACCESS_SECRET_12345"
+          JWT_REFRESH_SECRET: "TEST_ONLY_CI_JWT_REFRESH_SECRET_12345"
+        run: pnpm run test:integration
 
       - name: Docker Build Validation (Root Dockerfile)
         run: docker build -t forgegate-app:ci .

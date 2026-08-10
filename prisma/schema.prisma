@@ -160,6 +160,7 @@ model WorkflowExecution {
   workflowId  String    @map("workflow_id")
   tenantId    String    @map("tenant_id")
   status      String    @default("pending") // 'pending', 'running', 'completed', 'failed', 'retrying'
+  /// Operational denormalized pointer to current step order. StepExecution is the authoritative state model.
   currentStep Int       @default(1) @map("current_step")
   version     Int       @default(1)
   metadata    Json?
@@ -226,7 +227,7 @@ model StepExecution {
 
   @@index([executionId])
   @@index([status])
-  @@index([executionId, stepId, attempt])
+  @@unique([executionId, stepId, attempt])
   @@index([executionId, stepId, status])
   @@index([status, heartbeatAt])
   @@index([status, startedAt])

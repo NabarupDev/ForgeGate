@@ -36,9 +36,9 @@ services:
     ports:
       - "5432:5432"
     environment:
-      POSTGRES_USER: forgegate_user
-      POSTGRES_PASSWORD: forgegate_password
-      POSTGRES_DB: forgegate_db
+      POSTGRES_USER: ${POSTGRES_USER:-forgegate_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-DEV_ONLY_POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB:-forgegate_db}
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:

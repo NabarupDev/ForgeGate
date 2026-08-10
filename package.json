@@ -9,12 +9,16 @@
     "lint": "eslint \"{apps,packages,prisma}/**/*.ts\"",
     "audit": "pnpm audit --audit-level high",
     "test": "jest",
+    "test:unit": "jest --testPathIgnorePatterns='(comprehensive-failure-matrix|dlq-replay|failure-injection)'",
+    "test:integration": "jest apps/workflow-service/test/comprehensive-failure-matrix.spec.ts",
+    "test:matrix": "jest apps/workflow-service/test/comprehensive-failure-matrix.spec.ts",
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate dev",
     "prisma:seed": "ts-node prisma/seed.ts",
     "start:dev": "pnpm --filter api-gateway run start:dev",
-    "docker:up": "docker-compose -f infra/docker/docker-compose.yml up -d",
-    "docker:down": "docker-compose -f infra/docker/docker-compose.yml down"
+    "docker:up": "docker compose up -d",
+    "docker:down": "docker compose down",
+    "docker:infra": "docker compose -f infra/docker/docker-compose.yml up -d"
   },
   "dependencies": {
     "@prisma/client": "^5.22.0",

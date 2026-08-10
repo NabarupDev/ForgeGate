@@ -11,12 +11,12 @@ services:
     environment:
       - PORT=${PORT:-3000}
       - NODE_ENV=${NODE_ENV:-production}
-      - DATABASE_URL=${DATABASE_URL:-postgresql://${POSTGRES_USER:-forgegate_user}:${POSTGRES_PASSWORD:-dev_postgres_password}@postgres:5432/${POSTGRES_DB:-forgegate_db}?schema=public}
+      - DATABASE_URL=${DATABASE_URL:-postgresql://${POSTGRES_USER:-forgegate_user}:${POSTGRES_PASSWORD:-DEV_ONLY_POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-forgegate_db}?schema=public}
       - REDIS_HOST=${REDIS_HOST:-redis}
       - REDIS_PORT=${REDIS_PORT:-6379}
       - RABBITMQ_URL=${RABBITMQ_URL:-amqp://${RABBITMQ_USER:-guest}:${RABBITMQ_PASSWORD:-guest}@rabbitmq:5672}
-      - JWT_ACCESS_SECRET=${JWT_ACCESS_SECRET:-dev_jwt_access_secret_change_in_prod}
-      - JWT_REFRESH_SECRET=${JWT_REFRESH_SECRET:-dev_jwt_refresh_secret_change_in_prod}
+      - JWT_ACCESS_SECRET=${JWT_ACCESS_SECRET:-DEV_ONLY_JWT_ACCESS_SECRET_CHANGE_IN_PROD}
+      - JWT_REFRESH_SECRET=${JWT_REFRESH_SECRET:-DEV_ONLY_JWT_REFRESH_SECRET_CHANGE_IN_PROD}
     networks:
       - forgegate_internal
     depends_on:
@@ -33,7 +33,7 @@ services:
     container_name: forgegate_postgres
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-forgegate_user}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-dev_postgres_password}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-DEV_ONLY_POSTGRES_PASSWORD}
       POSTGRES_DB: ${POSTGRES_DB:-forgegate_db}
     volumes:
       - postgres_data:/var/lib/postgresql/data
