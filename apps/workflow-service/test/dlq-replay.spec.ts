@@ -84,7 +84,8 @@ describe('DLQ Diagnostic Metadata, Sanitization & Replay Spec', () => {
         },
       ]);
 
-      const jobs = await queueService.getDlqJobs();
+      const res = await queueService.getDlqJobs();
+      const jobs = res.data;
       expect(jobs.length).toBe(1);
       expect(jobs[0].executionId).toBe('exec-dlq-101');
       expect(jobs[0].failedStepId).toBe('step-payment');

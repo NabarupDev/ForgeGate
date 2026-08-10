@@ -79,6 +79,7 @@ describe('HTTP Step Timeout Handling & State Persistence Unit Tests', () => {
           findFirst: jest.fn(),
           findUnique: jest.fn(),
           update: jest.fn(),
+          updateMany: jest.fn().mockResolvedValue({ count: 1 }),
         },
         stepExecution: {
           findFirst: jest.fn(),
@@ -146,9 +147,9 @@ describe('HTTP Step Timeout Handling & State Persistence Unit Tests', () => {
       );
 
       // Verify StepExecution was updated with TIMED_OUT status
-      expect(prismaMock.stepExecution.update).toHaveBeenCalledWith(
+      expect(prismaMock.stepExecution.updateMany).toHaveBeenCalledWith(
         expect.objectContaining({
-          where: { id: 'se-timeout-1' },
+          where: { id: 'se-timeout-1', status: 'RUNNING', workerId: expect.any(String) },
           data: expect.objectContaining({
             status: 'TIMED_OUT',
             error: expect.stringContaining('timeout of 3000ms exceeded'),
@@ -193,9 +194,9 @@ describe('HTTP Step Timeout Handling & State Persistence Unit Tests', () => {
         engineService.executeExecution('exec-invalid-timeout-test', 'tenant-1', 1),
       ).rejects.toThrow('Invalid timeoutMs configuration: -500');
 
-      expect(prismaMock.stepExecution.update).toHaveBeenCalledWith(
+      expect(prismaMock.stepExecution.updateMany).toHaveBeenCalledWith(
         expect.objectContaining({
-          where: { id: 'se-invalid-timeout-1' },
+          where: { id: 'se-invalid-timeout-1', status: 'RUNNING', workerId: expect.any(String) },
           data: expect.objectContaining({
             status: 'FAILED',
             error: expect.stringContaining('Invalid timeoutMs configuration'),

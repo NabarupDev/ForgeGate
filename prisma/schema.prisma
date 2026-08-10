@@ -45,6 +45,8 @@ model User {
   oauthAccounts OAuthAccount[]
   refreshTokens RefreshToken[]
 
+  @@index([tenantId])
+  @@index([roleId])
   @@map("users")
   @@schema("auth")
 }
@@ -108,6 +110,7 @@ model RefreshToken {
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
+  @@index([userId, revoked])
   @@map("refresh_tokens")
   @@schema("auth")
 }
@@ -130,6 +133,8 @@ model Workflow {
   steps      WorkflowStep[]
   executions WorkflowExecution[]
 
+  @@index([tenantId, createdAt])
+  @@index([createdById])
   @@map("workflows")
   @@schema("workflow")
 }
@@ -145,6 +150,7 @@ model WorkflowStep {
   workflow       Workflow        @relation(fields: [workflowId], references: [id], onDelete: Cascade)
   stepExecutions StepExecution[]
 
+  @@index([workflowId, stepOrder])
   @@map("workflow_steps")
   @@schema("workflow")
 }
@@ -155,6 +161,7 @@ model WorkflowExecution {
   tenantId    String    @map("tenant_id")
   status      String    @default("pending") // 'pending', 'running', 'completed', 'failed', 'retrying'
   currentStep Int       @default(1) @map("current_step")
+  version     Int       @default(1)
   metadata    Json?
   startedAt   DateTime  @default(now()) @map("started_at")
   completedAt DateTime? @map("completed_at")
@@ -163,6 +170,9 @@ model WorkflowExecution {
   logs           ExecutionLog[]
   stepExecutions StepExecution[]
 
+  @@index([tenantId, startedAt])
+  @@index([workflowId, startedAt])
+  @@index([tenantId, status])
   @@map("workflow_executions")
   @@schema("workflow")
 }
@@ -178,6 +188,7 @@ model ExecutionLog {
 
   execution WorkflowExecution @relation(fields: [executionId], references: [id], onDelete: Cascade)
 
+  @@index([executionId, createdAt])
   @@map("execution_logs")
   @@schema("workflow")
 }
@@ -206,6 +217,7 @@ model StepExecution {
   error       String?
   workerId    String?             @map("worker_id")
   heartbeatAt DateTime?           @map("heartbeat_at")
+  version     Int                 @default(1)
   createdAt   DateTime            @default(now()) @map("created_at")
   updatedAt   DateTime            @updatedAt @map("updated_at")
 
@@ -215,6 +227,9 @@ model StepExecution {
   @@index([executionId])
   @@index([status])
   @@index([executionId, stepId, attempt])
+  @@index([executionId, stepId, status])
+  @@index([status, heartbeatAt])
+  @@index([status, startedAt])
   @@map("step_executions")
   @@schema("workflow")
 }
@@ -233,6 +248,8 @@ model AuditLog {
   metadata  Json?
   createdAt DateTime @default(now()) @map("created_at")
 
+  @@index([tenantId, createdAt])
+  @@index([userId, createdAt])
   @@map("audit_logs")
   @@schema("audit")
 }
@@ -249,6 +266,8 @@ model Subscription {
   status           String   @default("active")
   currentPeriodEnd DateTime @map("current_period_end")
 
+  @@index([tenantId, status])
+  @@index([userId])
   @@map("subscriptions")
   @@schema("billing")
 }

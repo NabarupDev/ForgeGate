@@ -19,8 +19,13 @@ export class WorkflowController {
   }
 
   @Get()
-  async getWorkflows(@CurrentUser() user: UserContext) {
-    return this.workflowService.getWorkflows(user);
+  async getWorkflows(
+    @CurrentUser() user: UserContext,
+    @Query('limit') limit?: string,
+    @Query('skip') skip?: string,
+    @Query('cursor') cursor?: string,
+  ) {
+    return this.workflowService.getWorkflows(user, { limit, skip, cursor });
   }
 
   @Get(':id')

@@ -2,6 +2,7 @@ import { Injectable, NotFoundException, BadRequestException, ForbiddenException 
 import { PrismaService } from '../prisma.service';
 import { CreateWorkflowDto } from './dto/create-workflow.dto';
 import { UserContext, AuthorizationPolicy } from '@forgegate/auth';
+import { parsePaginationParams, buildPaginatedResult, PaginationQuery, PaginatedResult } from '@forgegate/common';
 
 @Injectable()
 export class WorkflowService {
@@ -44,7 +45,10 @@ export class WorkflowService {
     });
   }
 
-  async getWorkflows(userOrTenantId?: UserContext | string) {
+  async getWorkflows(
+    userOrTenantId?: UserContext | string,
+    query?: PaginationQuery,
+  ): Promise<PaginatedResult<any>> {
     let tenantId: string | undefined;
     let userCtx: UserContext | undefined;
 
@@ -59,12 +63,27 @@ export class WorkflowService {
       throw new ForbiddenException(`Role '${userCtx.role}' is not authorized to read workflows`);
     }
 
-    const where = tenantId ? { tenantId } : {};
-    return this.prisma.workflow.findMany({
+    const { limit, skip, cursor } = parsePaginationParams(query);
+    const where: any = tenantId ? { tenantId } : {};
+
+    const totalCount = await this.prisma.workflow.count({ where });
+
+    const queryArgs: any = {
       where,
+      take: limit + 1,
       include: { steps: true, _count: { select: { executions: true } } },
-      orderBy: { createdAt: 'desc' },
-    });
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+    };
+
+    if (cursor) {
+      queryArgs.cursor = { id: cursor };
+      queryArgs.skip = 1;
+    } else if (skip) {
+      queryArgs.skip = skip;
+    }
+
+    const items = await this.prisma.workflow.findMany(queryArgs);
+    return buildPaginatedResult(items, limit, (item) => item.id, totalCount, skip);
   }
 
   async getWorkflowById(id: string, user?: UserContext) {

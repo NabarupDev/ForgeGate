@@ -4,6 +4,7 @@ import * as argon2 from 'argon2';
 import { PrismaService } from './prisma.service';
 import { RedisService } from './redis.service';
 import { StructuredLogger } from '@forgegate/logger';
+import { parsePaginationParams, buildPaginatedResult, PaginationQuery, PaginatedResult } from '@forgegate/common';
 
 export interface RegisterDto {
   email: string;
@@ -181,5 +182,59 @@ export class AuthService {
     } catch (e) {
       throw new UnauthorizedException('Invalid or expired token');
     }
+  }
+
+  async getUsers(tenantId?: string, pagination?: PaginationQuery): Promise<PaginatedResult<any>> {
+    const { limit, skip, cursor } = parsePaginationParams(pagination);
+    const where: any = tenantId ? { tenantId } : {};
+
+    const totalCount = await this.prisma.user.count({ where });
+
+    const queryArgs: any = {
+      where,
+      take: limit + 1,
+      select: {
+        id: true,
+        email: true,
+        name: true,
+        tenantId: true,
+        roleId: true,
+        isActive: true,
+        createdAt: true,
+        tenant: { select: { id: true, name: true, slug: true } },
+        role: { select: { id: true, name: true } },
+      },
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+    };
+
+    if (cursor) {
+      queryArgs.cursor = { id: cursor };
+      queryArgs.skip = 1;
+    } else if (skip) {
+      queryArgs.skip = skip;
+    }
+
+    const items = await this.prisma.user.findMany(queryArgs);
+    return buildPaginatedResult(items, limit, (item) => item.id, totalCount, skip);
+  }
+
+  async getTenants(pagination?: PaginationQuery): Promise<PaginatedResult<any>> {
+    const { limit, skip, cursor } = parsePaginationParams(pagination);
+    const totalCount = await this.prisma.tenant.count();
+
+    const queryArgs: any = {
+      take: limit + 1,
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+    };
+
+    if (cursor) {
+      queryArgs.cursor = { id: cursor };
+      queryArgs.skip = 1;
+    } else if (skip) {
+      queryArgs.skip = skip;
+    }
+
+    const items = await this.prisma.tenant.findMany(queryArgs);
+    return buildPaginatedResult(items, limit, (item) => item.id, totalCount, skip);
   }
 }

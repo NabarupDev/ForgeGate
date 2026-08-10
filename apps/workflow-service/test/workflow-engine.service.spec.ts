@@ -15,6 +15,7 @@ describe('WorkflowEngineService (Current Behavior & StepExecution Lifecycle Test
       workflowExecution: {
         findFirst: jest.fn(),
         update: jest.fn(),
+        updateMany: jest.fn().mockResolvedValue({ count: 1 }),
       },
       executionLog: {
         create: jest.fn(),
@@ -51,13 +52,15 @@ describe('WorkflowEngineService (Current Behavior & StepExecution Lifecycle Test
       };
 
       prismaMock.workflowExecution.findFirst.mockResolvedValue(mockExecution);
-      prismaMock.workflowExecution.update.mockResolvedValue({});
 
       await service.executeExecution('exec-1', 'tenant-1', 2);
 
-      expect(prismaMock.workflowExecution.update).toHaveBeenCalledWith({
-        where: { id: 'exec-1' },
-        data: { status: 'retrying' },
+      expect(prismaMock.workflowExecution.updateMany).toHaveBeenCalledWith({
+        where: {
+          id: 'exec-1',
+          status: { in: ['pending', 'retrying', 'running'] },
+        },
+        data: { status: 'retrying', version: { increment: 1 } },
       });
     });
   });
@@ -104,23 +107,25 @@ describe('WorkflowEngineService (Current Behavior & StepExecution Lifecycle Test
       });
 
       // 2. Transition to RUNNING via atomic updateMany
-      expect(prismaMock.stepExecution.updateMany).toHaveBeenCalledWith({
+      expect(prismaMock.stepExecution.updateMany).toHaveBeenNthCalledWith(1, {
         where: { id: 'step-exec-uuid-1', status: 'PENDING' },
         data: {
           status: 'RUNNING',
           workerId: expect.any(String),
           startedAt: expect.any(Date),
           heartbeatAt: expect.any(Date),
+          version: { increment: 1 },
         },
       });
 
       // 3. Transition to SUCCEEDED
-      expect(prismaMock.stepExecution.update).toHaveBeenCalledWith({
-        where: { id: 'step-exec-uuid-1' },
+      expect(prismaMock.stepExecution.updateMany).toHaveBeenCalledWith({
+        where: { id: 'step-exec-uuid-1', status: 'RUNNING', workerId: expect.any(String) },
         data: {
           status: 'SUCCEEDED',
           finishedAt: expect.any(Date),
           output: { transformed: true, output: { test: 'value' } },
+          version: { increment: 1 },
         },
       });
     });
@@ -146,7 +151,6 @@ describe('WorkflowEngineService (Current Behavior & StepExecution Lifecycle Test
       };
 
       prismaMock.workflowExecution.findFirst.mockResolvedValue(mockExecution);
-      prismaMock.workflowExecution.update.mockResolvedValue({});
       prismaMock.executionLog.create.mockResolvedValue({});
 
       mockedAxios.mockRejectedValue(new Error('Network error'));
@@ -156,8 +160,8 @@ describe('WorkflowEngineService (Current Behavior & StepExecution Lifecycle Test
       );
 
       // Transition to FAILED with structured HttpStepError details in output
-      expect(prismaMock.stepExecution.update).toHaveBeenCalledWith({
-        where: { id: 'step-exec-uuid-1' },
+      expect(prismaMock.stepExecution.updateMany).toHaveBeenCalledWith({
+        where: { id: 'step-exec-uuid-1', status: 'RUNNING', workerId: expect.any(String) },
         data: {
           status: 'FAILED',
           finishedAt: expect.any(Date),
@@ -166,6 +170,7 @@ describe('WorkflowEngineService (Current Behavior & StepExecution Lifecycle Test
             category: 'TRANSIENT_FAILURE',
             isRetryable: true,
           }),
+          version: { increment: 1 },
         },
       });
     });
@@ -191,7 +196,6 @@ describe('WorkflowEngineService (Current Behavior & StepExecution Lifecycle Test
       };
 
       prismaMock.workflowExecution.findFirst.mockResolvedValue(mockExecution);
-      prismaMock.workflowExecution.update.mockResolvedValue({});
       prismaMock.executionLog.create.mockResolvedValue({});
 
       const timeoutError: any = new Error('timeout of 5000ms exceeded');
@@ -201,8 +205,8 @@ describe('WorkflowEngineService (Current Behavior & StepExecution Lifecycle Test
       await expect(service.executeExecution('exec-timeout-step', 'tenant-1', 1)).rejects.toThrow();
 
       // Transition to TIMED_OUT with structured HttpStepError details in output
-      expect(prismaMock.stepExecution.update).toHaveBeenCalledWith({
-        where: { id: 'step-exec-uuid-1' },
+      expect(prismaMock.stepExecution.updateMany).toHaveBeenCalledWith({
+        where: { id: 'step-exec-uuid-1', status: 'RUNNING', workerId: expect.any(String) },
         data: {
           status: 'TIMED_OUT',
           finishedAt: expect.any(Date),
@@ -211,6 +215,7 @@ describe('WorkflowEngineService (Current Behavior & StepExecution Lifecycle Test
             category: 'TIMEOUT',
             isRetryable: true,
           }),
+          version: { increment: 1 },
         },
       });
     });
@@ -239,7 +244,6 @@ describe('WorkflowEngineService (Current Behavior & StepExecution Lifecycle Test
       };
 
       prismaMock.workflowExecution.findFirst.mockResolvedValue(mockExecution);
-      prismaMock.workflowExecution.update.mockResolvedValue({});
       prismaMock.executionLog.create.mockResolvedValue({});
 
       await service.executeExecution('exec-secret', 'tenant-1', 1);
@@ -263,16 +267,16 @@ describe('WorkflowEngineService (Current Behavior & StepExecution Lifecycle Test
 
   describe('markAsFailed', () => {
     it('should update workflow execution status to failed and create dead letter log entry', async () => {
-      prismaMock.workflowExecution.update.mockResolvedValue({});
       prismaMock.executionLog.create.mockResolvedValue({});
 
       await service.markAsFailed('exec-dlq-1', 'Max retries reached');
 
-      expect(prismaMock.workflowExecution.update).toHaveBeenCalledWith({
-        where: { id: 'exec-dlq-1' },
+      expect(prismaMock.workflowExecution.updateMany).toHaveBeenCalledWith({
+        where: { id: 'exec-dlq-1', status: { notIn: ['completed'] } },
         data: {
           status: 'failed',
           completedAt: expect.any(Date),
+          version: { increment: 1 },
         },
       });
 

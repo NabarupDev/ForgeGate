@@ -1,4 +1,4 @@
-import { Controller, Post, Get, Body, Param, Headers, UseGuards } from '@nestjs/common';
+import { Controller, Post, Get, Body, Param, Query, Headers, UseGuards } from '@nestjs/common';
 import { ExecutionService } from './execution.service';
 import { TriggerExecutionDto } from './dto/trigger-execution.dto';
 import { JwtAuthGuard, CurrentUser, UserContext } from '@forgegate/auth';
@@ -8,9 +8,36 @@ import { JwtAuthGuard, CurrentUser, UserContext } from '@forgegate/auth';
 export class ExecutionController {
   constructor(private readonly executionService: ExecutionService) {}
 
+  @Get('executions')
+  async getExecutions(
+    @CurrentUser() user: UserContext,
+    @Query('workflowId') workflowId?: string,
+    @Query('status') status?: string,
+    @Query('limit') limit?: string,
+    @Query('skip') skip?: string,
+    @Query('cursor') cursor?: string,
+  ) {
+    return this.executionService.getExecutions(
+      user,
+      { workflowId, status },
+      { limit, skip, cursor },
+    );
+  }
+
   @Get('executions/:id')
   async getExecution(@Param('id') id: string, @CurrentUser() user: UserContext) {
     return this.executionService.getExecution(id, user);
+  }
+
+  @Get('executions/:id/logs')
+  async getExecutionLogs(
+    @Param('id') id: string,
+    @CurrentUser() user: UserContext,
+    @Query('limit') limit?: string,
+    @Query('skip') skip?: string,
+    @Query('cursor') cursor?: string,
+  ) {
+    return this.executionService.getExecutionLogs(id, user, { limit, skip, cursor });
   }
 
   @Post(':id/trigger')

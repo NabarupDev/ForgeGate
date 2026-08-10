@@ -25,6 +25,7 @@ describe('ForgeGate Distributed Workflow Failure-Injection Test Suite', () => {
         findFirst: jest.fn(),
         findUnique: jest.fn(),
         update: jest.fn().mockResolvedValue({}),
+        updateMany: jest.fn().mockResolvedValue({ count: 1 }),
         create: jest.fn().mockResolvedValue({ id: 'exec-fail-1', status: 'pending' }),
       },
       stepExecution: {

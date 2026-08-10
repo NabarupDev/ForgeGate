@@ -86,12 +86,35 @@ export class WorkflowEngineService implements OnModuleDestroy {
     // Metric: Workflow execution started
     this.metricsService.workflowExecutionsTotal.inc({ status: 'started' });
 
-    // State transition to 'running' or 'retrying'
+    // State transition to 'running' or 'retrying' using atomic claim
     const statusState = attemptCount > 1 ? 'retrying' : 'running';
-    await this.prisma.workflowExecution.update({
-      where: { id: executionId },
-      data: { status: statusState },
-    });
+    let claimCount = 1;
+    if (this.prisma.workflowExecution.updateMany) {
+      const claimExecution = await this.prisma.workflowExecution.updateMany({
+        where: {
+          id: executionId,
+          status: { in: ['pending', 'retrying', 'running'] },
+        },
+        data: {
+          status: statusState,
+          version: { increment: 1 },
+        },
+      });
+      claimCount = claimExecution.count;
+    } else {
+      await this.prisma.workflowExecution.update({
+        where: { id: executionId },
+        data: { status: statusState },
+      });
+    }
+
+    if (claimCount === 0) {
+      this.structuredLogger.warn(`Workflow execution ${executionId} already finished or claimed by another worker. Aborting duplicate execution.`, {
+        executionId,
+        workerId,
+      });
+      return;
+    }
 
     this.structuredLogger.logEvent('workflow_execution_started', {
       tenantId,
@@ -138,10 +161,43 @@ export class WorkflowEngineService implements OnModuleDestroy {
           continue;
         }
 
-        await this.prisma.workflowExecution.update({
-          where: { id: executionId },
-          data: { currentStep: step.stepOrder },
+        // Check if step is currently being executed by another active worker
+        const activeStepExec = await this.prisma.stepExecution.findFirst({
+          where: {
+            executionId: execution.id,
+            stepId: step.id,
+            status: 'RUNNING',
+            heartbeatAt: { gte: new Date(Date.now() - 30000) },
+          },
         });
+
+        if (activeStepExec && activeStepExec.workerId !== workerId) {
+          this.structuredLogger.warn(`Step ${step.id} is active on worker ${activeStepExec.workerId}. Skipping redundant execution.`, {
+            executionId: execution.id,
+            stepId: step.id,
+            workerId,
+          });
+          continue;
+        }
+
+        if (this.prisma.workflowExecution.updateMany) {
+          await this.prisma.workflowExecution.updateMany({
+            where: {
+              id: executionId,
+              currentStep: { lt: step.stepOrder },
+              status: { in: ['running', 'retrying'] },
+            },
+            data: {
+              currentStep: step.stepOrder,
+              version: { increment: 1 },
+            },
+          });
+        } else {
+          await this.prisma.workflowExecution.update({
+            where: { id: executionId },
+            data: { currentStep: step.stepOrder },
+          });
+        }
 
         // Metric: Step execution started
         this.metricsService.stepExecutionsTotal.inc({ action_type: step.actionType, status: 'started' });
@@ -158,19 +214,33 @@ export class WorkflowEngineService implements OnModuleDestroy {
           },
         });
 
-        // 2. Atomic claim: transition StepExecution PENDING -> RUNNING
-        const claimResult = await this.prisma.stepExecution.updateMany({
-          where: {
-            id: stepExec.id,
-            status: 'PENDING',
-          },
-          data: {
-            status: 'RUNNING',
-            workerId,
-            startedAt: new Date(),
-            heartbeatAt: new Date(),
-          },
-        });
+        // 2. Atomic claim: transition StepExecution PENDING -> RUNNING with version increment
+        let claimResult = { count: 1 };
+        if (this.prisma.stepExecution.updateMany) {
+          claimResult = await this.prisma.stepExecution.updateMany({
+            where: {
+              id: stepExec.id,
+              status: 'PENDING',
+            },
+            data: {
+              status: 'RUNNING',
+              workerId,
+              startedAt: new Date(),
+              heartbeatAt: new Date(),
+              version: { increment: 1 },
+            },
+          });
+        } else {
+          await this.prisma.stepExecution.update({
+            where: { id: stepExec.id },
+            data: {
+              status: 'RUNNING',
+              workerId,
+              startedAt: new Date(),
+              heartbeatAt: new Date(),
+            },
+          });
+        }
 
         if (claimResult.count === 0) {
           this.structuredLogger.warn(`Could not claim step ${step.id} for execution ${execution.id}`, {
@@ -184,10 +254,12 @@ export class WorkflowEngineService implements OnModuleDestroy {
         // Start active heartbeat timer (updates heartbeatAt every 5 seconds)
         const heartbeatTimer = setInterval(async () => {
           try {
-            await this.prisma.stepExecution.updateMany({
-              where: { id: stepExec.id, status: 'RUNNING', workerId },
-              data: { heartbeatAt: new Date() },
-            });
+            if (this.prisma.stepExecution.updateMany) {
+              await this.prisma.stepExecution.updateMany({
+                where: { id: stepExec.id, status: 'RUNNING', workerId },
+                data: { heartbeatAt: new Date() },
+              });
+            }
           } catch (hbErr) {
             // Silence transient heartbeat updates
           }
@@ -202,15 +274,27 @@ export class WorkflowEngineService implements OnModuleDestroy {
             correlationId: effectiveCorrelationId,
           });
 
-          // 3. Transition StepExecution RUNNING -> SUCCEEDED
-          await this.prisma.stepExecution.update({
-            where: { id: stepExec.id },
-            data: {
-              status: 'SUCCEEDED',
-              finishedAt: new Date(),
-              output: sanitizePayload(stepResult) as any,
-            },
-          });
+          // 3. Transition StepExecution RUNNING -> SUCCEEDED with version increment
+          if (this.prisma.stepExecution.updateMany) {
+            await this.prisma.stepExecution.updateMany({
+              where: { id: stepExec.id, status: 'RUNNING', workerId },
+              data: {
+                status: 'SUCCEEDED',
+                finishedAt: new Date(),
+                output: sanitizePayload(stepResult) as any,
+                version: { increment: 1 },
+              },
+            });
+          } else {
+            await this.prisma.stepExecution.update({
+              where: { id: stepExec.id },
+              data: {
+                status: 'SUCCEEDED',
+                finishedAt: new Date(),
+                output: sanitizePayload(stepResult) as any,
+              },
+            });
+          }
 
           // Metric: Step succeeded
           this.metricsService.stepExecutionsTotal.inc({ action_type: step.actionType, status: 'succeeded' });
@@ -235,16 +319,29 @@ export class WorkflowEngineService implements OnModuleDestroy {
             this.metricsService.stepTimeoutsTotal.inc({ action_type: step.actionType });
           }
 
-          // Transition StepExecution RUNNING -> FAILED / TIMED_OUT
-          await this.prisma.stepExecution.update({
-            where: { id: stepExec.id },
-            data: {
-              status: endStatus,
-              finishedAt: new Date(),
-              error: stepErr.message || 'Unknown step execution error',
-              output: isHttpErr ? (stepErr.toJSON() as any) : undefined,
-            },
-          });
+          // Transition StepExecution RUNNING -> FAILED / TIMED_OUT with version increment
+          if (this.prisma.stepExecution.updateMany) {
+            await this.prisma.stepExecution.updateMany({
+              where: { id: stepExec.id, status: 'RUNNING', workerId },
+              data: {
+                status: endStatus,
+                finishedAt: new Date(),
+                error: stepErr.message || 'Unknown step execution error',
+                output: isHttpErr ? (stepErr.toJSON() as any) : undefined,
+                version: { increment: 1 },
+              },
+            });
+          } else {
+            await this.prisma.stepExecution.update({
+              where: { id: stepExec.id },
+              data: {
+                status: endStatus,
+                finishedAt: new Date(),
+                error: stepErr.message || 'Unknown step execution error',
+                output: isHttpErr ? (stepErr.toJSON() as any) : undefined,
+              },
+            });
+          }
 
           throw stepErr;
         } finally {
@@ -268,16 +365,28 @@ export class WorkflowEngineService implements OnModuleDestroy {
         stepPayloadInput = { ...currentPayload, [`step_${step.stepOrder}`]: stepResult };
       }
 
-      // Transition execution to 'completed'
+      // Transition execution to 'completed' with version increment
       const durationMs = Date.now() - startTime;
-      await this.prisma.workflowExecution.update({
-        where: { id: executionId },
-        data: {
-          status: 'completed',
-          completedAt: new Date(),
-          metadata: stepPayloadInput as any,
-        },
-      });
+      if (this.prisma.workflowExecution.updateMany) {
+        await this.prisma.workflowExecution.updateMany({
+          where: { id: executionId, status: { in: ['running', 'retrying'] } },
+          data: {
+            status: 'completed',
+            completedAt: new Date(),
+            metadata: stepPayloadInput as any,
+            version: { increment: 1 },
+          },
+        });
+      } else {
+        await this.prisma.workflowExecution.update({
+          where: { id: executionId },
+          data: {
+            status: 'completed',
+            completedAt: new Date(),
+            metadata: stepPayloadInput as any,
+          },
+        });
+      }
 
       // Metrics: Workflow succeeded
       this.metricsService.workflowExecutionsTotal.inc({ status: 'succeeded' });
@@ -338,6 +447,7 @@ export class WorkflowEngineService implements OnModuleDestroy {
           { heartbeatAt: null, startedAt: { lt: cutoffTime } },
         ],
       },
+      take: 100,
       include: {
         execution: true,
       },
@@ -361,10 +471,17 @@ export class WorkflowEngineService implements OnModuleDestroy {
 
       if (updated.count > 0 && stepExec.execution) {
         if (stepExec.execution.status === 'running') {
-          await this.prisma.workflowExecution.update({
-            where: { id: stepExec.execution.id },
-            data: { status: 'retrying' },
-          });
+          if (this.prisma.workflowExecution.updateMany) {
+            await this.prisma.workflowExecution.updateMany({
+              where: { id: stepExec.execution.id, status: 'running' },
+              data: { status: 'retrying', version: { increment: 1 } },
+            });
+          } else {
+            await this.prisma.workflowExecution.update({
+              where: { id: stepExec.execution.id },
+              data: { status: 'retrying' },
+            });
+          }
         }
 
         recoveredMap.set(stepExec.execution.id, {
@@ -599,13 +716,27 @@ export class WorkflowEngineService implements OnModuleDestroy {
   }
 
   async markAsFailed(executionId: string, errorReason: string) {
-    await this.prisma.workflowExecution.update({
-      where: { id: executionId },
-      data: {
-        status: 'failed',
-        completedAt: new Date(),
-      },
-    });
+    if (this.prisma.workflowExecution.updateMany) {
+      await this.prisma.workflowExecution.updateMany({
+        where: {
+          id: executionId,
+          status: { notIn: ['completed'] },
+        },
+        data: {
+          status: 'failed',
+          completedAt: new Date(),
+          version: { increment: 1 },
+        },
+      });
+    } else {
+      await this.prisma.workflowExecution.update({
+        where: { id: executionId },
+        data: {
+          status: 'failed',
+          completedAt: new Date(),
+        },
+      });
+    }
 
     await this.prisma.executionLog.create({
       data: {

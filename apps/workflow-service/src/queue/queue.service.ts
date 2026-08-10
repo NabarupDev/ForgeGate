@@ -1,7 +1,7 @@
 import { Injectable, OnModuleInit, OnModuleDestroy, ForbiddenException, ConflictException } from '@nestjs/common';
 import { Queue, Worker, QueueEvents, Job } from 'bullmq';
 import { StructuredLogger } from '@forgegate/logger';
-import { MetricsService } from '@forgegate/common';
+import { MetricsService, parsePaginationParams, buildPaginatedResult, PaginationQuery, PaginatedResult } from '@forgegate/common';
 import { WorkflowEngineService } from '../workflow-engine/workflow-engine.service';
 import { calculateRetryDecision } from '../workflow-engine/http-retry-scheduler';
 
@@ -427,10 +427,10 @@ export class QueueService implements OnModuleInit, OnModuleDestroy {
     };
   }
 
-  async getDlqJobs(filterTenantId?: string) {
-    if (!this.dlqQueue) return [];
+  async getDlqJobs(filterTenantId?: string, pagination?: PaginationQuery): Promise<PaginatedResult<any>> {
+    if (!this.dlqQueue) return buildPaginatedResult([], 50);
     const jobs = await this.dlqQueue.getJobs(['waiting', 'active', 'completed', 'failed']);
-    const mapped = jobs.map((job) => {
+    let mapped = jobs.map((job) => {
       const d = job.data || {};
       const isRateLimited = (d.rateLimitDeferralCount || 0) > 0 || d.failureCategory === 'RATE_LIMITED';
       const replayed = Boolean(d.replayed);
@@ -461,9 +461,14 @@ export class QueueService implements OnModuleInit, OnModuleDestroy {
     });
 
     if (filterTenantId) {
-      return mapped.filter((item) => item.tenantId === filterTenantId);
+      mapped = mapped.filter((item) => item.tenantId === filterTenantId);
     }
-    return mapped;
+
+    const { limit, skip } = parsePaginationParams(pagination);
+    const totalCount = mapped.length;
+    const items = mapped.slice(skip, skip + limit + 1);
+
+    return buildPaginatedResult(items, limit, (item) => item.id, totalCount, skip);
   }
 
   async replayDeadLetterExecution(executionId: string, tenantId: string) {

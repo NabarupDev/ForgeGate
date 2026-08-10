@@ -19,6 +19,7 @@ describe('Crash-Safe Workflow Step Recovery Tests', () => {
       workflowExecution: {
         findFirst: jest.fn(),
         update: jest.fn(),
+        updateMany: jest.fn().mockResolvedValue({ count: 1 }),
       },
       executionLog: {
         create: jest.fn(),
@@ -93,13 +94,14 @@ describe('Crash-Safe Workflow Step Recovery Tests', () => {
           workerId: expect.any(String),
         },
       });
-      expect(prismaMock.stepExecution.updateMany).toHaveBeenCalledWith({
+      expect(prismaMock.stepExecution.updateMany).toHaveBeenNthCalledWith(1, {
         where: { id: 'step-exec-uuid-99', status: 'PENDING' },
         data: {
           status: 'RUNNING',
           workerId: expect.any(String),
           startedAt: expect.any(Date),
           heartbeatAt: expect.any(Date),
+          version: { increment: 1 },
         },
       });
     });
@@ -137,9 +139,9 @@ describe('Crash-Safe Workflow Step Recovery Tests', () => {
           error: 'Worker lease expired (crash detected)',
         },
       });
-      expect(prismaMock.workflowExecution.update).toHaveBeenCalledWith({
-        where: { id: 'exec-stale-1' },
-        data: { status: 'retrying' },
+      expect(prismaMock.workflowExecution.updateMany).toHaveBeenCalledWith({
+        where: { id: 'exec-stale-1', status: 'running' },
+        data: { status: 'retrying', version: { increment: 1 } },
       });
     });
 
@@ -255,8 +257,8 @@ describe('Crash-Safe Workflow Step Recovery Tests', () => {
       expect(mockedAxios).not.toHaveBeenCalled();
 
       // Step 2 should be executed using Step 1's cached output
-      expect(prismaMock.workflowExecution.update).toHaveBeenCalledWith({
-        where: { id: 'exec-completed-step-1' },
+      expect(prismaMock.workflowExecution.updateMany).toHaveBeenCalledWith({
+        where: { id: 'exec-completed-step-1', status: { in: ['running', 'retrying'] } },
         data: {
           status: 'completed',
           completedAt: expect.any(Date),
@@ -264,6 +266,7 @@ describe('Crash-Safe Workflow Step Recovery Tests', () => {
             step_1: { statusCode: 200, data: { cached: true } },
             step_2: { transformed: true, output: { res: 'ok' } },
           },
+          version: { increment: 1 },
         },
       });
     });
@@ -313,8 +316,8 @@ describe('Crash-Safe Workflow Step Recovery Tests', () => {
       const res = await engineService.executeExecution('exec-e2e-rec', 'tenant-1', 2);
 
       expect(res.status).toBe('completed');
-      expect(prismaMock.workflowExecution.update).toHaveBeenCalledWith({
-        where: { id: 'exec-e2e-rec' },
+      expect(prismaMock.workflowExecution.updateMany).toHaveBeenCalledWith({
+        where: { id: 'exec-e2e-rec', status: { in: ['running', 'retrying'] } },
         data: {
           status: 'completed',
           completedAt: expect.any(Date),
@@ -322,6 +325,7 @@ describe('Crash-Safe Workflow Step Recovery Tests', () => {
             step_1: { result: 'step1-ok' },
             step_2: { transformed: true, output: { step2: 'done' } },
           },
+          version: { increment: 1 },
         },
       });
     });

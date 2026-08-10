@@ -235,6 +235,7 @@ describe('Outbound Rate Limiter Unit & Integration Tests', () => {
         workflowExecution: {
           findFirst: jest.fn(),
           update: jest.fn(),
+          updateMany: jest.fn().mockResolvedValue({ count: 1 }),
         },
         stepExecution: {
           findFirst: jest.fn(),
@@ -321,6 +322,7 @@ describe('Outbound Rate Limiter Unit & Integration Tests', () => {
         workflowExecution: {
           findFirst: jest.fn(),
           update: jest.fn(),
+          updateMany: jest.fn().mockResolvedValue({ count: 1 }),
         },
         stepExecution: {
           findFirst: jest.fn(),

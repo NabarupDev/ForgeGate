@@ -1,4 +1,4 @@
-import { Module, Controller, Post, Body, Get, Headers, UseGuards, Req } from '@nestjs/common';
+import { Module, Controller, Post, Body, Get, Query, Headers, UseGuards, Req } from '@nestjs/common';
 import { JwtModule } from '@nestjs/jwt';
 import { ConfigModule } from '@nestjs/config';
 import { PrismaService } from './prisma.service';
@@ -28,6 +28,25 @@ export class AuthController {
   @Post('verify')
   async verify(@Body() body: { token: string }) {
     return this.authService.verifyToken(body.token);
+  }
+
+  @Get('users')
+  async getUsers(
+    @Query('tenantId') tenantId?: string,
+    @Query('limit') limit?: string,
+    @Query('skip') skip?: string,
+    @Query('cursor') cursor?: string,
+  ) {
+    return this.authService.getUsers(tenantId, { limit, skip, cursor });
+  }
+
+  @Get('tenants')
+  async getTenants(
+    @Query('limit') limit?: string,
+    @Query('skip') skip?: string,
+    @Query('cursor') cursor?: string,
+  ) {
+    return this.authService.getTenants({ limit, skip, cursor });
   }
 
   @Get('health')

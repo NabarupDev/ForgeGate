@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Param, UseGuards } from '@nestjs/common';
+import { Controller, Get, Post, Param, Query, UseGuards } from '@nestjs/common';
 import { QueueService } from './queue.service';
 import { JwtAuthGuard, RolesGuard, Roles, CurrentUser, UserContext } from '@forgegate/auth';
 
@@ -15,9 +15,13 @@ export class QueueController {
 
   @Get('dlq/jobs')
   @Roles('admin', 'operator')
-  async getDlqJobs(@CurrentUser() user: UserContext) {
+  async getDlqJobs(
+    @CurrentUser() user: UserContext,
+    @Query('limit') limit?: string,
+    @Query('skip') skip?: string,
+  ) {
     const tenantId = user?.role === 'admin' ? undefined : user?.tenantId;
-    return this.queueService.getDlqJobs(tenantId);
+    return this.queueService.getDlqJobs(tenantId, { limit, skip });
   }
 
   @Post('dlq/:jobId/retry')
